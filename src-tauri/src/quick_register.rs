@@ -50,9 +50,24 @@ pub async fn quick_register(
         return Err(ApiError::from(anyhow!("浏览器登录正在进行中，请稍后再试")));
     }
 
+    // 获取设置中的 API 密钥
+    let api_key = {
+        let settings = state.settings.lock().await;
+        let key = settings.api_key.clone();
+        if key.is_empty() {
+            println!("[quick-register] ❌ 未配置 API 密钥");
+            return Err(ApiError::from(anyhow!(
+                "请先填写 API 密钥\n\n请在设置中填写 API 密钥后再使用快速注册功能。"
+            )));
+        } else {
+            println!("[quick-register] 使用配置的 API 密钥");
+            Some(key)
+        }
+    };
+
     // ========== 步骤 1: 初始化 ==========
     println!("[quick-register] 步骤 1/6: 初始化 MailClient...");
-    let mail_client = MailClient::new().await.map_err(ApiError::from)?;
+    let mail_client = MailClient::new(api_key).await.map_err(ApiError::from)?;
 
     println!("[quick-register] 步骤 2/6: 生成随机密码...");
     let password = generate_password();

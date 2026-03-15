@@ -11,31 +11,47 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
 use crate::{
+    emit_quick_register_notice,
     mail_client::{wait_for_verification_code, MailClient, generate_password},
     Account, AppState, ApiError,
 };
 
 pub async fn quick_register_simple(
     app: AppHandle,
-    _show_window: bool,
+    show_window: bool,
     state: State<'_, AppState>,
 ) -> Result<Account, ApiError> {
+    println!("\n========================================");
+    println!("[quick-register-simple] 🚀 开始快速注册流程");
+    println!("========================================\n");
+
     // 检查是否已有浏览器登录在进行中
     if state.browser_login.lock().await.is_some() {
         return Err(ApiError::from(anyhow!("浏览器登录正在进行中，请稍后再试")));
     }
 
-    // 读取设置获取 API 密钥
-    let settings = state.settings.lock().await.clone();
-    let api_key = if settings.api_key.is_empty() {
-        None
-    } else {
-        Some(settings.api_key.clone())
+    // 获取设置中的 API 密钥
+    let api_key = {
+        let settings = state.settings.lock().await;
+        let key = settings.api_key.clone();
+        if key.is_empty() {
+            println!("[quick-register-simple] ❌ 未配置 API 密钥");
+            return Err(ApiError::from(anyhow!(
+                "请先填写 API 密钥\n\n请在设置中填写 API 密钥后再使用快速注册功能。"
+            )));
+        } else {
+            println!("[quick-register-simple] 使用配置的 API 密钥");
+            Some(key)
+        }
     };
 
-    let mail_client = MailClient::new_with_key(api_key).await.map_err(ApiError::from)?;
+    // 初始化
+    println!("[quick-register-simple] 初始化 MailClient...");
+    let mail_client = MailClient::new(api_key).await.map_err(ApiError::from)?;
     let password = generate_password();
     let email = MailClient::generate_email();
+    println!("[quick-register-simple] 📧 邮箱: {}", email);
+    println!("[quick-register-simple] 🔑 密码: {}******", &password[..3]);
 
     // 启动本地回调服务器
     let (token_tx, token_rx) = oneshot::channel::<(String, String)>();
@@ -49,6 +65,10 @@ pub async fn quick_register_simple(
     let route = warp::path("callback")
         .and(warp::query::<HashMap<String, String>>())
         .map(move |query: HashMap<String, String>| {
+            if let Some(msg) = query.get("log") {
+                println!("[quick-register-js] {}", msg);
+            }
+
             let token = query.get("token").cloned().unwrap_or_default();
             let url = query.get("url").cloned().unwrap_or_default();
 
@@ -88,6 +108,7 @@ pub async fn quick_register_simple(
             
             var sendToken = function(token, url) {{
                 if (!token) return;
+                console.log('[TokenIntercept] 捕获到 Token:', token.substring(0, 20) + '...');
                 var fullUrl = callbackUrl + '?token=' + encodeURIComponent(token) + '&url=' + encodeURIComponent(url);
                 if (navigator.sendBeacon) {{
                     navigator.sendBeacon(fullUrl);
@@ -106,19 +127,25 @@ pub async fn quick_register_simple(
             window.fetch = async function() {{
                 var url = arguments[0];
                 var urlStr = typeof url === 'string' ? url : (url.url || '');
+                console.log('[TokenIntercept] Fetch请求:', urlStr.substring(0, 100));
                 
                 var response = await originalFetch.apply(this, arguments);
                 
                 // 检查是否包含 token 或 user 相关接口
                 if (urlStr.includes('GetUserToken') || urlStr.includes('token') || urlStr.includes('user')) {{
+                    console.log('[TokenIntercept] 捕获到可能的Token接口:', urlStr);
                     try {{
                         var cloned = response.clone();
                         var data = await cloned.json();
+                        console.log('[TokenIntercept] 响应数据:', JSON.stringify(data).substring(0, 200));
                         var token = parseToken(data);
                         if (token) {{
+                            console.log('[TokenIntercept] 成功提取Token');
                             sendToken(token, urlStr);
                         }}
-                    }} catch (e) {{}}
+                    }} catch (e) {{
+                        console.log('[TokenIntercept] 解析失败:', e.message);
+                    }}
                 }}
                 return response;
             }};
@@ -128,29 +155,48 @@ pub async fn quick_register_simple(
             var originalSend = XMLHttpRequest.prototype.send;
             XMLHttpRequest.prototype.open = function(method, url) {{
                 this._url = url;
+                console.log('[TokenIntercept] XHR请求:', (url || '').substring(0, 100));
                 return originalOpen.apply(this, arguments);
             }};
             XMLHttpRequest.prototype.send = function() {{
                 var xhr = this;
                 var url = this._url || '';
                 if (url.includes('GetUserToken') || url.includes('token') || url.includes('user')) {{
+                    console.log('[TokenIntercept] 捕获到可能的Token XHR:', url);
                     this.addEventListener('load', function() {{
                         try {{
                             var data = JSON.parse(xhr.responseText);
+                            console.log('[TokenIntercept] XHR响应:', JSON.stringify(data).substring(0, 200));
                             var token = parseToken(data);
                             if (token) {{
+                                console.log('[TokenIntercept] 成功提取Token');
                                 sendToken(token, url);
                             }}
-                        }} catch (e) {{}}
+                        }} catch (e) {{
+                            console.log('[TokenIntercept] XHR解析失败:', e.message);
+                        }}
                     }});
                 }}
                 return originalSend.apply(this, arguments);
             }};
+            
+            // 同时尝试从 localStorage 获取
+            setTimeout(function() {{
+                console.log('[TokenIntercept] 检查localStorage...');
+                for (var key in localStorage) {{
+                    if (key.toLowerCase().includes('token')) {{
+                        console.log('[TokenIntercept] 发现token key:', key);
+                    }}
+                }}
+            }}, 5000);
+            
+            console.log('[TokenIntercept] Token 拦截器已安装（initialization_script）');
         }})();
         "#,
         port
     );
 
+    println!("[quick-register-simple] 创建浏览器窗口...");
     let webview = tauri::webview::WebviewWindowBuilder::new(
         &app,
         "trae-register",
@@ -159,14 +205,16 @@ pub async fn quick_register_simple(
     .title("Trae 注册")
     .inner_size(1000.0, 720.0)
     .visible(true)
-    .initialization_script(&init_script)
+    .initialization_script(&init_script)  // 页面创建时就注入拦截器
     .build()
     .map_err(|e| ApiError::from(anyhow!("无法打开注册窗口: {}", e)))?;
 
     // 等待页面加载
+    println!("[quick-register-simple] 等待页面加载...");
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     // 填入邮箱并点击 Send Code
+    println!("[quick-register-simple] 填入邮箱并点击 Send Code...");
     let email_escaped = email.replace("\"", "\\\"");
     
     for i in 1..=10 {
@@ -180,6 +228,7 @@ pub async fn quick_register_simple(
                     input.value = "{}";
                     input.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    console.log('[AutoFill] 邮箱已填入');
                 }}
             }})()"#,
             email_escaped
@@ -193,6 +242,7 @@ pub async fn quick_register_simple(
                     var btn = document.querySelector('.right-part.send-code') || document.querySelector('.send-code');
                     if (btn) {
                         btn.click();
+                        console.log('[AutoFill] Send Code 已点击');
                     }
                 })()
             "#;
@@ -201,6 +251,7 @@ pub async fn quick_register_simple(
     }
 
     // 等待验证码邮件
+    println!("[quick-register-simple] 等待验证码邮件...");
     tokio::time::sleep(Duration::from_secs(5)).await;
     
     let code = match wait_for_verification_code(&mail_client, Duration::from_secs(60)).await {
@@ -210,8 +261,11 @@ pub async fn quick_register_simple(
             return Err(ApiError::from(err));
         }
     };
+    
+    println!("[quick-register-simple] ✅ 获取验证码: {}", code);
 
     // 填入验证码、密码并点击注册
+    println!("[quick-register-simple] 填入验证码、密码并点击注册...");
     let code_escaped = code.replace("\"", "\\\"");
     let password_escaped = password.replace("\"", "\\\"");
     
@@ -253,6 +307,7 @@ pub async fn quick_register_simple(
                     var btn = document.querySelector('.btn-submit') || document.querySelector('.trae__btn');
                     if (btn) {
                         btn.click();
+                        console.log('[AutoFill] Sign Up 已点击');
                     }
                 })()
             "#;
@@ -261,13 +316,16 @@ pub async fn quick_register_simple(
     }
 
     // 等待注册完成
+    println!("[quick-register-simple] 等待注册完成...");
     tokio::time::sleep(Duration::from_secs(5)).await;
 
     // 等待 Token（最多30秒）
+    println!("[quick-register-simple] ⏳ 等待 Token...");
     let token_result = tokio::time::timeout(Duration::from_secs(30), token_rx).await;
     
     let (token, _url, cookies) = match token_result {
         Ok(Ok((token, url))) => {
+            println!("[quick-register-simple] ✅ 收到 Token");
             // 获取 cookies
             let cookies = match wait_for_request_cookies(&webview, &url, Duration::from_secs(6)).await {
                 Ok(cookies) => cookies,
@@ -276,16 +334,22 @@ pub async fn quick_register_simple(
             (Some(token), url, cookies)
         }
         _ => {
+            println!("[quick-register-simple] ⚠️ 未收到 Token，尝试从页面获取 cookies...");
             // 尝试从当前页面获取 cookies
             let cookies = match webview.cookies() {
                 Ok(cookie_list) => {
-                    cookie_list
+                    let cookies_str = cookie_list
                         .into_iter()
                         .map(|c| format!("{}={}", c.name(), c.value()))
                         .collect::<Vec<_>>()
-                        .join("; ")
+                        .join("; ");
+                    println!("[quick-register-simple] 从页面获取到 cookies: {}...", &cookies_str[..50.min(cookies_str.len())]);
+                    cookies_str
                 }
-                Err(_) => String::new(),
+                Err(e) => {
+                    println!("[quick-register-simple] 获取 cookies 失败: {}", e);
+                    String::new()
+                }
             };
             (None, String::new(), cookies)
         }
@@ -294,6 +358,7 @@ pub async fn quick_register_simple(
     let _ = webview.close();
 
     // 保存账号
+    println!("[quick-register-simple] 保存账号...");
     let mut manager = state.account_manager.lock().await;
     
     let mut account = if let Some(token) = token {
@@ -304,6 +369,7 @@ pub async fn quick_register_simple(
             .map_err(ApiError::from)?
     } else {
         // 没有 Token，但有 Cookies，尝试使用 add_account
+        println!("[quick-register-simple] 使用 Cookies 添加账号...");
         if cookies.is_empty() {
             return Err(ApiError::from(anyhow!("未能获取 Token 或 Cookies")));
         }
@@ -317,6 +383,11 @@ pub async fn quick_register_simple(
         manager.update_account_email(&account.id, email.clone()).map_err(ApiError::from)?;
         account = manager.get_account(&account.id).map_err(ApiError::from)?;
     }
+
+    println!("\n========================================");
+    println!("[quick-register-simple] ✅ 快速注册完成!");
+    println!("[quick-register-simple] 📧 邮箱: {}", account.email);
+    println!("========================================\n");
 
     Ok(account)
 }
