@@ -47,7 +47,20 @@ impl MailClient {
         };
         println!("[MailClient] 正在请求验证码: GET {}", url);
         
-        let resp = self.client.get(&url).send().await?;
+        let resp = match self.client.get(&url).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("[MailClient] ❌ 请求失败: {}", e);
+                if e.is_connect() {
+                    println!("[MailClient]    连接错误，请检查网络或 API 地址");
+                }
+                if e.is_timeout() {
+                    println!("[MailClient]    请求超时");
+                }
+                return Err(e.into());
+            }
+        };
+        
         let status = resp.status();
         println!("[MailClient] API 响应状态: {}", status);
 

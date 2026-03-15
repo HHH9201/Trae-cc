@@ -180,14 +180,37 @@ pub async fn quick_register_simple(
                 return originalSend.apply(this, arguments);
             }};
             
-            // 同时尝试从 localStorage 获取
-            setTimeout(function() {{
-                console.log('[TokenIntercept] 检查localStorage...');
-                for (var key in localStorage) {{
-                    if (key.toLowerCase().includes('token')) {{
-                        console.log('[TokenIntercept] 发现token key:', key);
-                    }}
+            // 同时尝试从 localStorage 和 sessionStorage 获取
+            var checkStorageForToken = function() {{
+                console.log('[TokenIntercept] 检查 Storage...');
+                var sources = [{{name: 'localStorage', storage: localStorage}}, {{name: 'sessionStorage', storage: sessionStorage}}];
+                for (var i = 0; i < sources.length; i++) {{
+                    var src = sources[i];
+                    try {{
+                        for (var key in src.storage) {{
+                            var lowerKey = key.toLowerCase();
+                            if (lowerKey.includes('token') || lowerKey.includes('jwt') || lowerKey.includes('auth')) {{
+                                console.log('[TokenIntercept] 发现token key:', src.name, key);
+                                var value = src.storage.getItem(key);
+                                if (value && value.length > 20) {{
+                                    console.log('[TokenIntercept] 尝试发送 Storage token');
+                                    sendToken(value, src.name + ':' + key);
+                                }}
+                            }}
+                        }}
+                    }} catch(e) {{}}
                 }}
+            }};
+            
+            // 多次检查 Storage
+            setTimeout(checkStorageForToken, 3000);
+            setTimeout(checkStorageForToken, 8000);
+            setTimeout(checkStorageForToken, 15000);
+            
+            // 定期检查是否有 token
+            setInterval(function() {{
+                if (window.__trae_last_token) return;
+                checkStorageForToken();
             }}, 5000);
             
             console.log('[TokenIntercept] Token 拦截器已安装（initialization_script）');
@@ -317,19 +340,42 @@ pub async fn quick_register_simple(
 
     // 等待注册完成
     println!("[quick-register-simple] 等待注册完成...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(8)).await;
 
-    // 等待 Token（最多30秒）
-    println!("[quick-register-simple] ⏳ 等待 Token...");
-    let token_result = tokio::time::timeout(Duration::from_secs(30), token_rx).await;
+    // 等待 Token（最多60秒）
+    println!("[quick-register-simple] ⏳ 等待 Token（最多60秒）...");
+    let token_result = tokio::time::timeout(Duration::from_secs(60), token_rx).await;
     
     let (token, _url, cookies) = match token_result {
         Ok(Ok((token, url))) => {
             println!("[quick-register-simple] ✅ 收到 Token");
+            println!("[quick-register-simple] Token 前50字符: {}...", &token[..50.min(token.len())]);
+            println!("[quick-register-simple] Token 长度: {}", token.len());
             // 获取 cookies
             let cookies = match wait_for_request_cookies(&webview, &url, Duration::from_secs(6)).await {
-                Ok(cookies) => cookies,
-                Err(_) => String::new(),
+                Ok(cookies) => {
+                    println!("[quick-register-simple] ✅ 获取到请求 cookies: {}...", &cookies[..50.min(cookies.len())]);
+                    cookies
+                }
+                Err(e) => {
+                    println!("[quick-register-simple] ⚠️ 获取请求 cookies 失败: {}", e);
+                    // 尝试从页面获取 cookies
+                    match webview.cookies() {
+                        Ok(cookie_list) => {
+                            let cookies_str = cookie_list
+                                .into_iter()
+                                .map(|c| format!("{}={}", c.name(), c.value()))
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            println!("[quick-register-simple] 从页面获取到 cookies: {}...", &cookies_str[..50.min(cookies_str.len())]);
+                            cookies_str
+                        }
+                        Err(e) => {
+                            println!("[quick-register-simple] 获取页面 cookies 也失败: {}", e);
+                            String::new()
+                        }
+                    }
+                }
             };
             (Some(token), url, cookies)
         }
@@ -363,10 +409,17 @@ pub async fn quick_register_simple(
     
     let mut account = if let Some(token) = token {
         // 有 Token，使用 Token 添加账号
-        manager
-            .add_account_by_token(token, Some(cookies), Some(password))
-            .await
-            .map_err(ApiError::from)?
+        println!("[quick-register-simple] 使用 Token 添加账号...");
+        match manager.add_account_by_token(token, Some(cookies), Some(password)).await {
+            Ok(acc) => {
+                println!("[quick-register-simple] ✅ 账号添加成功: user_id={}", acc.user_id);
+                acc
+            }
+            Err(e) => {
+                println!("[quick-register-simple] ❌ 使用 Token 添加账号失败: {}", e);
+                return Err(ApiError::from(e));
+            }
+        }
     } else {
         // 没有 Token，但有 Cookies，尝试使用 add_account
         println!("[quick-register-simple] 使用 Cookies 添加账号...");
@@ -375,18 +428,36 @@ pub async fn quick_register_simple(
         }
         
         // 使用 add_account 方法（它会通过 cookies 获取 token 和用户信息）
-        manager.add_account(cookies, Some(password)).await.map_err(ApiError::from)?
+        match manager.add_account(cookies, Some(password)).await {
+            Ok(acc) => {
+                println!("[quick-register-simple] ✅ 账号添加成功: user_id={}", acc.user_id);
+                acc
+            }
+            Err(e) => {
+                println!("[quick-register-simple] ❌ 使用 Cookies 添加账号失败: {}", e);
+                return Err(ApiError::from(e));
+            }
+        }
     };
 
     // 更新邮箱
     if account.email.trim().is_empty() || account.email.contains('*') || !account.email.contains('@') {
-        manager.update_account_email(&account.id, email.clone()).map_err(ApiError::from)?;
-        account = manager.get_account(&account.id).map_err(ApiError::from)?;
+        println!("[quick-register-simple] 更新账号邮箱为: {}", email);
+        match manager.update_account_email(&account.id, email.clone()) {
+            Ok(_) => {
+                account = manager.get_account(&account.id).map_err(ApiError::from)?;
+                println!("[quick-register-simple] ✅ 邮箱更新成功");
+            }
+            Err(e) => {
+                println!("[quick-register-simple] ⚠️ 邮箱更新失败: {}", e);
+            }
+        }
     }
 
     println!("\n========================================");
     println!("[quick-register-simple] ✅ 快速注册完成!");
     println!("[quick-register-simple] 📧 邮箱: {}", account.email);
+    println!("[quick-register-simple] 👤 用户名: {}", account.name);
     println!("========================================\n");
 
     Ok(account)

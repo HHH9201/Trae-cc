@@ -162,12 +162,35 @@ impl TraeApiClient {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(anyhow!("获取用户信息失败: {}", response.status()));
+        if response.status().is_success() {
+            let data: GetUserInfoResponse = response.json().await?;
+            return Ok(data.result);
         }
 
-        let data: GetUserInfoResponse = response.json().await?;
-        Ok(data.result)
+        // GetUserInfo API 失败（如 404），尝试从 Token 解析基本信息
+        println!("[TraeApiClient] GetUserInfo (with token) API 失败 ({}), 尝试从 Token 解析", response.status());
+        
+        if let Some(ref token) = self.jwt_token {
+            if let Ok(jwt_data) = Self::parse_jwt_token(token) {
+                return Ok(UserInfoResult {
+                    screen_name: format!("User_{}", &jwt_data.user_id[..8.min(jwt_data.user_id.len())]),
+                    gender: String::new(),
+                    avatar_url: String::new(),
+                    user_id: jwt_data.user_id,
+                    description: String::new(),
+                    tenant_id: jwt_data.tenant_id,
+                    register_time: String::new(),
+                    last_login_time: String::new(),
+                    last_login_type: String::new(),
+                    region: String::new(),
+                    ai_region: Some(String::new()),
+                    non_plain_text_email: None,
+                    store_country: None,
+                });
+            }
+        }
+
+        Err(anyhow!("获取用户信息失败: {}", response.status()))
     }
 
     fn parse_jwt_token(token: &str) -> Result<JwtPayload> {
@@ -295,12 +318,35 @@ impl TraeApiClient {
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            return Err(anyhow!("获取用户信息失败: {}", response.status()));
+        if response.status().is_success() {
+            let data: GetUserInfoResponse = response.json().await?;
+            return Ok(data.result);
         }
 
-        let data: GetUserInfoResponse = response.json().await?;
-        Ok(data.result)
+        // GetUserInfo API 失败（如 404），尝试从 Token 解析基本信息
+        println!("[TraeApiClient] GetUserInfo API 失败 ({}), 尝试从 Token 解析用户信息", response.status());
+        
+        if let Some(ref token) = self.jwt_token {
+            if let Ok(jwt_data) = Self::parse_jwt_token(token) {
+                return Ok(UserInfoResult {
+                    screen_name: format!("User_{}", &jwt_data.user_id[..8.min(jwt_data.user_id.len())]),
+                    gender: String::new(),
+                    avatar_url: String::new(),
+                    user_id: jwt_data.user_id,
+                    description: String::new(),
+                    tenant_id: jwt_data.tenant_id,
+                    register_time: String::new(),
+                    last_login_time: String::new(),
+                    last_login_type: String::new(),
+                    region: String::new(),
+                    ai_region: Some(String::new()),
+                    non_plain_text_email: None,
+                    store_country: None,
+                });
+            }
+        }
+
+        Err(anyhow!("获取用户信息失败: {}", response.status()))
     }
 
     pub async fn get_entitlement_list(&self) -> Result<EntitlementListResponse> {

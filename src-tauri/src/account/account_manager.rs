@@ -158,22 +158,24 @@ impl AccountManager {
         if let Some(index) = existing_index {
             // 账号已存在，更新信息
             println!("[AccountManager] 账号已存在，更新信息: user_id={}", token_result.user_id);
-            let existing_account = &mut self.store.accounts[index];
-            existing_account.cookies = cookies;
-            existing_account.jwt_token = Some(token_result.token);
-            existing_account.token_expired_at = Some(token_result.expired_at);
-            existing_account.name = user_info.screen_name.clone();
-            existing_account.email = user_info.non_plain_text_email.unwrap_or_default();
-            existing_account.avatar_url = user_info.avatar_url.clone();
-            existing_account.region = user_info.region.clone();
-            existing_account.tenant_id = token_result.tenant_id.clone();
-            if let Some(pass) = password {
-                existing_account.password = Some(pass);
+            {
+                let existing_account = &mut self.store.accounts[index];
+                existing_account.cookies = cookies;
+                existing_account.jwt_token = Some(token_result.token);
+                existing_account.token_expired_at = Some(token_result.expired_at);
+                existing_account.name = user_info.screen_name.clone();
+                existing_account.email = user_info.non_plain_text_email.unwrap_or_default();
+                existing_account.avatar_url = user_info.avatar_url.clone();
+                existing_account.region = user_info.region.clone();
+                existing_account.tenant_id = token_result.tenant_id.clone();
+                if let Some(pass) = password {
+                    existing_account.password = Some(pass);
+                }
+                existing_account.updated_at = chrono::Utc::now().timestamp();
             }
-            existing_account.updated_at = chrono::Utc::now().timestamp();
             
             self.save_store()?;
-            return Ok(existing_account.clone());
+            return Ok(self.store.accounts[index].clone());
         }
 
         let mut account = Account::new(
@@ -203,7 +205,22 @@ impl AccountManager {
 
     /// 添加账号（通过 Token，可选 Cookies）
     /// 如果账号已存在，则更新账号信息
+    /// 如果 Token 不是 JWT 格式，会尝试使用 Cookies 添加账号
     pub async fn add_account_by_token(&mut self, token: String, cookies: Option<String>, password: Option<String>) -> Result<Account> {
+        // 检查 Token 是否是 JWT 格式（包含两个点号）
+        let is_jwt = token.split('.').count() == 3;
+        
+        if !is_jwt {
+            println!("[AccountManager] Token 不是 JWT 格式，尝试使用 Cookies 添加账号");
+            // 尝试使用 Cookies 添加账号
+            if let Some(ref cookies_str) = cookies {
+                if !cookies_str.is_empty() {
+                    return self.add_account(cookies_str.clone(), password).await;
+                }
+            }
+            return Err(anyhow!("Token 不是有效的 JWT 格式，且没有提供 Cookies"));
+        }
+        
         let client = TraeApiClient::new_with_token(&token)?;
 
         // 通过 Token 获取用户信息
@@ -242,31 +259,33 @@ impl AccountManager {
                 )
             };
             
-            let existing_account = &mut self.store.accounts[index];
-            existing_account.jwt_token = Some(token);
-            existing_account.token_expired_at = None;
-            if let Some(cookie_str) = cookies.as_ref().filter(|v| !v.is_empty()) {
-                existing_account.cookies = cookie_str.to_string();
+            {
+                let existing_account = &mut self.store.accounts[index];
+                existing_account.jwt_token = Some(token);
+                existing_account.token_expired_at = None;
+                if let Some(cookie_str) = cookies.as_ref().filter(|v| !v.is_empty()) {
+                    existing_account.cookies = cookie_str.to_string();
+                }
+                if let Some(pass) = password {
+                    existing_account.password = Some(pass);
+                }
+                if !name.trim().is_empty() {
+                    existing_account.name = name;
+                }
+                if !email.trim().is_empty() {
+                    existing_account.email = email;
+                }
+                if !avatar_url.trim().is_empty() {
+                    existing_account.avatar_url = avatar_url;
+                }
+                if !user_info.tenant_id.trim().is_empty() {
+                    existing_account.tenant_id = user_info.tenant_id.clone();
+                }
+                existing_account.updated_at = chrono::Utc::now().timestamp();
             }
-            if let Some(pass) = password {
-                existing_account.password = Some(pass);
-            }
-            if !name.trim().is_empty() {
-                existing_account.name = name;
-            }
-            if !email.trim().is_empty() {
-                existing_account.email = email;
-            }
-            if !avatar_url.trim().is_empty() {
-                existing_account.avatar_url = avatar_url;
-            }
-            if !user_info.tenant_id.trim().is_empty() {
-                existing_account.tenant_id = user_info.tenant_id.clone();
-            }
-            existing_account.updated_at = chrono::Utc::now().timestamp();
             
             self.save_store()?;
-            return Ok(existing_account.clone());
+            return Ok(self.store.accounts[index].clone());
         }
 
         // 如果提供了 Cookies，尝试获取更详细的用户信息
@@ -426,31 +445,33 @@ impl AccountManager {
             let client = TraeApiClient::new_with_token(&login_result.token)?;
             let user_info = client.get_user_info_by_token().await?;
             
-            let existing_account = &mut self.store.accounts[index];
-            existing_account.cookies = login_result.cookies;
-            existing_account.jwt_token = Some(login_result.token);
-            existing_account.token_expired_at = Some(login_result.expired_at);
-            existing_account.password = Some(password.clone());
-            if !email.trim().is_empty() {
-                existing_account.email = email;
-            }
-            if let Some(name) = user_info.screen_name {
-                if !name.trim().is_empty() {
-                    existing_account.name = name;
+            {
+                let existing_account = &mut self.store.accounts[index];
+                existing_account.cookies = login_result.cookies;
+                existing_account.jwt_token = Some(login_result.token);
+                existing_account.token_expired_at = Some(login_result.expired_at);
+                existing_account.password = Some(password.clone());
+                if !email.trim().is_empty() {
+                    existing_account.email = email;
                 }
-            }
-            if let Some(avatar) = user_info.avatar_url {
-                if !avatar.trim().is_empty() {
-                    existing_account.avatar_url = avatar;
+                if let Some(name) = user_info.screen_name {
+                    if !name.trim().is_empty() {
+                        existing_account.name = name;
+                    }
                 }
+                if let Some(avatar) = user_info.avatar_url {
+                    if !avatar.trim().is_empty() {
+                        existing_account.avatar_url = avatar;
+                    }
+                }
+                if !login_result.tenant_id.trim().is_empty() {
+                    existing_account.tenant_id = login_result.tenant_id;
+                }
+                existing_account.updated_at = chrono::Utc::now().timestamp();
             }
-            if !login_result.tenant_id.trim().is_empty() {
-                existing_account.tenant_id = login_result.tenant_id;
-            }
-            existing_account.updated_at = chrono::Utc::now().timestamp();
             
             self.save_store()?;
-            return Ok(existing_account.clone());
+            return Ok(self.store.accounts[index].clone());
         }
 
         // 使用 Token 获取完整的用户信息
