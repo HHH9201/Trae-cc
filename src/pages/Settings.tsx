@@ -114,7 +114,9 @@ export function Settings({
       setTraePath(path);
       onToast?.("success", "已找到 Trae IDE: " + path);
     } catch (err: any) {
-      onToast?.("error", err.message || "未找到 Trae IDE，请手动设置路径");
+      onToast?.("error", err.message || "未找到 Trae IDE，请手动设置");
+      // 自动扫描失败，弹出手动选择对话框
+      await handleSetTraePath();
     } finally {
       setScanning(false);
     }

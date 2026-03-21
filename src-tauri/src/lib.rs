@@ -19,8 +19,11 @@ use std::time::{Duration, Instant};
 use reqwest::Client;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{oneshot, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri::webview::PageLoadEvent;
+use tauri::tray::TrayIconBuilder;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri_plugin_updater::UpdaterExt;
 use uuid::Uuid;
 use warp::Filter;
 
@@ -1345,6 +1348,38 @@ async fn scan_trae_path() -> Result<String> {
     machine::scan_trae_path().map_err(ApiError::from)
 }
 
+/// 检查更新
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Result<Option<serde_json::Value>> {
+    let updater = app.updater().map_err(|e| ApiError::from(anyhow::anyhow!("获取更新器失败: {}", e)))?;
+    
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let info = serde_json::json!({
+                "version": update.version,
+                "current_version": update.current_version,
+                "body": update.body,
+                "date": update.date.map(|d| d.to_string())
+            });
+            Ok(Some(info))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(ApiError::from(anyhow::anyhow!("检查更新失败: {}", e)))
+    }
+}
+
+/// 下载并安装更新
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<()> {
+    let updater = app.updater().map_err(|e| ApiError::from(anyhow::anyhow!("获取更新器失败: {}", e)))?;
+    
+    if let Some(update) = updater.check().await.map_err(|e| ApiError::from(anyhow::anyhow!("检查更新失败: {}", e)))? {
+        update.download_and_install(|_, _| {}, || {}).await.map_err(|e| ApiError::from(anyhow::anyhow!("下载安装失败: {}", e)))?;
+    }
+    
+    Ok(())
+}
+
 /// 打开购买页面（内置浏览器，携带账号 Cookies）
 #[tauri::command]
 async fn open_pricing(account_id: String, app: AppHandle, state: State<'_, AppState>) -> Result<()> {
@@ -1533,6 +1568,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_positioner::init())
         .manage(AppState {
             account_manager: Mutex::new(account_manager),
             browser_login: Mutex::new(None),
@@ -1577,7 +1614,66 @@ pub fn run() {
             scan_trae_path,
             get_user_statistics,
             open_pricing,
+            check_update,
+            install_update,
         ])
+        .setup(|app| {
+            // 创建托盘菜单
+            let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+            let hide_item = MenuItem::with_id(app, "hide", "隐藏窗口", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            
+            let tray_menu = Menu::with_items(app, &[&show_item, &hide_item, &separator, &quit_item])?;
+
+            // 设置托盘图标
+            if let Some(icon) = app.default_window_icon() {
+                let tray = TrayIconBuilder::new()
+                    .icon(icon.clone())
+                    .tooltip("Trae账号管理")
+                    .menu(&tray_menu)
+                    .on_menu_event(|app, event| {
+                        match event.id().as_ref() {
+                            "show" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                            "hide" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.hide();
+                                }
+                            }
+                            "quit" => {
+                                std::process::exit(0);
+                            }
+                            _ => {}
+                        }
+                    })
+                    .build(app);
+                
+                if let Err(e) = tray {
+                    println!("[ERROR] 创建托盘图标失败: {}", e);
+                }
+            }
+
+            // 获取主窗口并显示
+            if let Some(window) = app.get_webview_window("main") {
+                window.show().unwrap();
+                window.set_focus().unwrap();
+            }
+            Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            // 拦截关闭事件，改为隐藏窗口
+            WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                window.hide().unwrap();
+            }
+            _ => {}
+        })
+
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

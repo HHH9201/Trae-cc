@@ -1,4 +1,42 @@
-export function About() {
+import { useState } from "react";
+import * as api from "../api";
+
+interface AboutProps {
+  onToast?: (type: "success" | "error" | "warning" | "info", message: string, duration?: number) => void;
+}
+
+export function About({ onToast }: AboutProps) {
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; current_version: string; body: string; date: string } | null>(null);
+
+  // 检查更新
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    try {
+      const info = await api.checkUpdate();
+      if (info) {
+        setUpdateInfo(info);
+        onToast?.("info", `发现新版本: ${info.version}`);
+      } else {
+        onToast?.("success", "当前已是最新版本");
+      }
+    } catch (err: any) {
+      onToast?.("error", err.message || "检查更新失败");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  // 安装更新
+  const handleInstallUpdate = async () => {
+    try {
+      onToast?.("info", "正在下载并安装更新...");
+      await api.installUpdate();
+    } catch (err: any) {
+      onToast?.("error", err.message || "安装更新失败");
+    }
+  };
+
   return (
     <div className="about-page">
       <div className="about-card">
@@ -43,6 +81,68 @@ export function About() {
             >
               HHH9201/Trae-CC
             </a>
+          </div>
+        </div>
+
+        {/* 分割线 */}
+        <div className="about-divider"></div>
+
+        {/* 软件更新 */}
+        <div className="about-update-section">
+          <div className="about-update-header">
+            <div className="about-update-icon">🔄</div>
+            <div className="about-update-title">软件更新</div>
+          </div>
+          <div className="about-update-content">
+            {updateInfo ? (
+              <div className="about-update-info">
+                <div className="about-update-version">
+                  <span className="new-version">{updateInfo.version}</span>
+                  <span className="current-version">当前: {updateInfo.current_version}</span>
+                </div>
+                {updateInfo.body && (
+                  <div className="about-update-body">
+                    {updateInfo.body}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="about-update-desc">检查并安装最新版本</div>
+            )}
+          </div>
+          <div className="about-update-actions">
+            {!updateInfo ? (
+              <button
+                onClick={handleCheckUpdate}
+                disabled={checkingUpdate}
+                className="about-update-btn"
+              >
+                {checkingUpdate ? (
+                  <>
+                    <span className="btn-spinner"></span>
+                    检查中...
+                  </>
+                ) : (
+                  "检查更新"
+                )}
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handleCheckUpdate}
+                  disabled={checkingUpdate}
+                  className="about-update-btn secondary"
+                >
+                  重新检查
+                </button>
+                <button
+                  onClick={handleInstallUpdate}
+                  className="about-update-btn primary"
+                >
+                  立即更新
+                </button>
+              </>
+            )}
           </div>
         </div>
         

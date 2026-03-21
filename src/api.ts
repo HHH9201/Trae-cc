@@ -240,3 +240,15 @@ export async function getUserStatistics(accountId: string): Promise<UserStatisti
 export async function openPricing(accountId: string): Promise<void> {
   return invokeNetwork("open_pricing", { accountId });
 }
+
+// ============ 更新相关 API ============
+
+// 检查更新
+export async function checkUpdate(): Promise<{ version: string; current_version: string; body: string; date: string } | null> {
+  return invoke("check_update");
+}
+
+// 安装更新
+export async function installUpdate(): Promise<void> {
+  return invoke("install_update");
+}

@@ -68,8 +68,8 @@ accounts.txt
 .env.*
 !.env.example
 
-# Scripts (Python helper scripts)
-scripts/ 
+# Scripts (Python helper scripts at root only, not src-tauri/scripts)
+/scripts/
 __pycache__/
 *.py[cod]
 .venv/

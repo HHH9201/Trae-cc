@@ -227,21 +227,21 @@ pub async fn quick_register_simple(
     )
     .title("Trae 注册")
     .inner_size(1000.0, 720.0)
-    .visible(true)
+    .visible(show_window)
     .initialization_script(&init_script)  // 页面创建时就注入拦截器
     .build()
     .map_err(|e| ApiError::from(anyhow!("无法打开注册窗口: {}", e)))?;
 
     // 等待页面加载
     println!("[quick-register-simple] 等待页面加载...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     // 填入邮箱并点击 Send Code
     println!("[quick-register-simple] 填入邮箱并点击 Send Code...");
     let email_escaped = email.replace("\"", "\\\"");
     
-    for i in 1..=10 {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+    for i in 1..=6 {
+        tokio::time::sleep(Duration::from_millis(300)).await;
         
         // 填入邮箱
         let fill_email_script = format!(
@@ -259,7 +259,7 @@ pub async fn quick_register_simple(
         let _ = webview.eval(fill_email_script);
         
         // 点击 Send Code
-        if i == 5 {
+        if i == 3 {
             let click_script = r#"
                 (function() {
                     var btn = document.querySelector('.right-part.send-code') || document.querySelector('.send-code');
@@ -275,7 +275,7 @@ pub async fn quick_register_simple(
 
     // 等待验证码邮件
     println!("[quick-register-simple] 等待验证码邮件...");
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     
     let code = match wait_for_verification_code(&mail_client, Duration::from_secs(60)).await {
         Ok(code) => code,
@@ -292,8 +292,8 @@ pub async fn quick_register_simple(
     let code_escaped = code.replace("\"", "\\\"");
     let password_escaped = password.replace("\"", "\\\"");
     
-    for i in 1..=10 {
-        tokio::time::sleep(Duration::from_millis(500)).await;
+    for i in 1..=5 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
         
         // 填入验证码
         let fill_code_script = format!(
@@ -324,7 +324,7 @@ pub async fn quick_register_simple(
         let _ = webview.eval(fill_pass_script);
         
         // 点击注册按钮
-        if i >= 5 {
+        if i >= 3 {
             let click_script = r#"
                 (function() {
                     var btn = document.querySelector('.btn-submit') || document.querySelector('.trae__btn');
@@ -340,7 +340,7 @@ pub async fn quick_register_simple(
 
     // 等待注册完成
     println!("[quick-register-simple] 等待注册完成...");
-    tokio::time::sleep(Duration::from_secs(8)).await;
+    tokio::time::sleep(Duration::from_secs(4)).await;
 
     // 等待 Token（最多60秒）
     println!("[quick-register-simple] ⏳ 等待 Token（最多60秒）...");

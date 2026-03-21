@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import { Sidebar } from "./components/Sidebar";
 import { AccountCard } from "./components/AccountCard";
 import { AccountListItem } from "./components/AccountListItem";
@@ -405,6 +405,44 @@ function App() {
     }
   };
 
+  // 检查并设置 Trae IDE 路径
+  const checkAndSetTraePath = async (): Promise<boolean> => {
+    try {
+      // 先尝试获取已保存的路径
+      await api.getTraePath();
+      return true;
+    } catch {
+      // 路径未设置或无效，尝试自动扫描
+      try {
+        const path = await api.scanTraePath();
+        addToast("success", "已自动找到 Trae IDE: " + path);
+        return true;
+      } catch {
+        // 自动扫描失败，弹出手动选择对话框
+        const selected = await open({
+          multiple: false,
+          filters: [{
+            name: "Trae IDE",
+            extensions: ["exe"]
+          }],
+          title: "请选择 Trae.exe 文件"
+        });
+
+        if (selected) {
+          try {
+            await api.setTraePath(selected as string);
+            addToast("success", "Trae IDE 路径已设置");
+            return true;
+          } catch (err: any) {
+            addToast("error", err.message || "设置路径失败");
+            return false;
+          }
+        }
+        return false;
+      }
+    }
+  };
+
   // 切换账号 / 重新登录（同逻辑）
   const handleSwitchAccount = async (
     accountId: string,
@@ -412,6 +450,13 @@ function App() {
   ) => {
     const account = accounts.find((a) => a.id === accountId);
     if (!account) return;
+
+    // 先检查 Trae IDE 路径
+    const pathValid = await checkAndSetTraePath();
+    if (!pathValid) {
+      addToast("error", "未设置 Trae IDE 路径，无法切换账号");
+      return;
+    }
 
     const mode = options?.mode ?? "switch";
     const force = options?.force ?? mode === "relogin";
@@ -421,7 +466,7 @@ function App() {
         ? `确定要重新登录账号 "${account.email || account.name}" 吗？\n\n系统将自动关闭 Trae IDE 并重新写入登录信息。`
         : `确定要切换到账号 "${account.email || account.name}" 吗？\n\n系统将自动关闭 Trae IDE 并切换登录信息。`;
     const infoToast = mode === "relogin" ? "正在重新登录，请稍候..." : "正在切换账号，请稍候...";
-    const successToast = mode === "relogin" ? "账号重新登录完成，请重新打开 Trae IDE" : "账号切换成功，请重新打开 Trae IDE";
+    const successToast = mode === "relogin" ? "账号重新登录完成" : "账号切换成功";
     const errorToast = mode === "relogin" ? "重新登录失败" : "切换账号失败";
 
     setConfirmModal({
@@ -889,7 +934,7 @@ function App() {
           />
         )}
 
-        {currentPage === "about" && <About />}
+        {currentPage === "about" && <About onToast={addToast} />}
       </div>
 
       {/* Toast 通知 */}

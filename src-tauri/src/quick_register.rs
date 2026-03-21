@@ -146,7 +146,7 @@ pub async fn quick_register(
     )
     .title("Trae 注册")
     .inner_size(1000.0, 720.0)
-    .visible(true)  // 始终显示窗口，方便调试
+    .visible(show_window)
     .on_page_load(move |window, payload| {
         let url = payload.url();
         println!("[quick-register] 页面加载事件: {:?} - {}", payload.event(), url);

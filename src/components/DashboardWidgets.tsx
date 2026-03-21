@@ -458,7 +458,16 @@ const AICodeAcceptedWidget: React.FC<{ count: number, breakdown: Record<string, 
 };
 
 // 3. Chat Count
-const ChatCountWidget: React.FC<{ count: number, theme: ThemeColors }> = ({ count, theme }) => {
+const ChatCountWidget: React.FC<{ count: number, agentBreakdown: Record<string, number>, theme: ThemeColors }> = ({ count, agentBreakdown, theme }) => {
+  // 计算 Agent 占比
+  const agentTotal = Object.values(agentBreakdown).reduce((sum, val) => sum + val, 0);
+  const agentPercentage = count > 0 ? Math.round((agentTotal / count) * 100) : 0;
+  
+  // 找出使用最多的 Agent
+  const topAgent = Object.entries(agentBreakdown)
+    .sort((a, b) => b[1] - a[1])[0];
+  const topAgentName = topAgent ? topAgent[0] : 'Agent';
+  
   return (
     <div className="widget-card">
       <div className="widget-header">
@@ -472,8 +481,8 @@ const ChatCountWidget: React.FC<{ count: number, theme: ThemeColors }> = ({ coun
       <div style={{ marginTop: '15px' }}>
           {/* Agent Row */}
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 500, color: theme.textPrimary, marginRight: '8px' }}>Agent</span>
-            <span style={{ fontSize: '12px', color: theme.textMuted, marginLeft: 'auto' }}>100%</span>
+            <span style={{ fontSize: '13px', fontWeight: 500, color: theme.textPrimary, marginRight: '8px' }}>{topAgentName}</span>
+            <span style={{ fontSize: '12px', color: theme.textMuted, marginLeft: 'auto' }}>{agentPercentage}%</span>
           </div>
           {/* Progress Bar */}
           <div className="progress-bar-bg" style={{ position: 'relative', height: '8px', backgroundColor: theme.gridStroke, borderRadius: '4px', overflow: 'hidden' }}>
@@ -481,10 +490,11 @@ const ChatCountWidget: React.FC<{ count: number, theme: ThemeColors }> = ({ coun
                   position: 'absolute', 
                   top: 0, 
                   left: 0, 
-                  width: '100%', 
+                  width: `${agentPercentage}%`, 
                   height: '100%', 
                   backgroundColor: theme.primary, 
-                  borderRadius: '4px' 
+                  borderRadius: '4px',
+                  transition: 'width 0.3s ease'
               }} />
           </div>
       </div>
@@ -759,7 +769,7 @@ export const DashboardWidgets: React.FC<DashboardWidgetsProps> = ({ data }) => {
       <div className="widget-row-split">
         <div className="widget-col">
             <AICodeAcceptedWidget count={data.CodeAiAcceptCnt7d} breakdown={data.CodeAiAcceptDiffLanguageCnt7d} theme={theme} />
-            <ChatCountWidget count={data.CodeCompCnt7d} theme={theme} />
+            <ChatCountWidget count={data.CodeCompCnt7d} agentBreakdown={data.CodeCompDiffAgentCnt7d} theme={theme} />
         </div>
         <div className="widget-col">
             <ModelPreferenceWidget data={data.CodeCompDiffModelCnt7d} theme={theme} />

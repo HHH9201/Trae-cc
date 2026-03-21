@@ -138,8 +138,8 @@ pub async fn wait_for_verification_code(client: &MailClient, timeout: Duration) 
             }
         }
         
-        println!("[MailClient] 等待 5 秒后重试...");
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        println!("[MailClient] 等待 3 秒后重试...");
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
 
     println!("[MailClient] ❌ 等待验证码超时 ({} 秒)", timeout.as_secs());

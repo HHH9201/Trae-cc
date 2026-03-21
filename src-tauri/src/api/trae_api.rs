@@ -151,24 +151,45 @@ impl TraeApiClient {
     }
 
     async fn get_user_info_with_token(&self) -> Result<UserInfoResult> {
-        let url = format!("{}/cloudide/api/v3/trae/GetUserInfo", API_BASE_UG);
         let headers = self.build_headers_token_only()?;
+        let endpoints = [API_BASE_UG, API_BASE_SG, API_BASE_US];
+        
+        let mut last_error = anyhow!("所有 GetUserInfo API 端点都失败");
+        
+        for base in endpoints.iter() {
+            let url = format!("{}/cloudide/api/v3/trae/GetUserInfo", base);
+            println!("[TraeApiClient] 尝试 GetUserInfo 端点: {}", base);
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&json!({"IfWebPage": true}))
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let data: GetUserInfoResponse = response.json().await?;
-            return Ok(data.result);
+            match self
+                .client
+                .post(&url)
+                .headers(headers.clone())
+                .json(&json!({"IfWebPage": true}))
+                .send()
+                .await 
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<GetUserInfoResponse>().await {
+                        Ok(data) => return Ok(data.result),
+                        Err(e) => {
+                            println!("[TraeApiClient] 解析响应失败: {}", e);
+                            last_error = anyhow!("解析响应失败: {}", e);
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    println!("[TraeApiClient] GetUserInfo API 返回错误: {}", resp.status());
+                    last_error = anyhow!("API 返回错误: {}", resp.status());
+                }
+                Err(e) => {
+                    println!("[TraeApiClient] GetUserInfo 请求失败: {}", e);
+                    last_error = anyhow!("请求失败: {}", e);
+                }
+            }
         }
 
-        // GetUserInfo API 失败（如 404），尝试从 Token 解析基本信息
-        println!("[TraeApiClient] GetUserInfo (with token) API 失败 ({}), 尝试从 Token 解析", response.status());
+        // 所有 GetUserInfo API 端点都失败，尝试从 Token 解析基本信息
+        println!("[TraeApiClient] 所有 GetUserInfo API 端点都失败，尝试从 Token 解析");
         
         if let Some(ref token) = self.jwt_token {
             if let Ok(jwt_data) = Self::parse_jwt_token(token) {
@@ -190,7 +211,7 @@ impl TraeApiClient {
             }
         }
 
-        Err(anyhow!("获取用户信息失败: {}", response.status()))
+        Err(last_error)
     }
 
     fn parse_jwt_token(token: &str) -> Result<JwtPayload> {
@@ -250,8 +271,6 @@ impl TraeApiClient {
     }
 
     pub async fn get_user_token(&mut self) -> Result<UserTokenResult> {
-        let url = format!("{}/cloudide/api/v3/common/GetUserToken", self.api_base);
-        
         let mut headers = header::HeaderMap::new();
         headers.insert(header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse()?);
         headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
@@ -265,66 +284,107 @@ impl TraeApiClient {
             headers.insert(header::COOKIE, cookie_value);
         }
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers.clone())
-            .send()
-            .await?;
-
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        // 所有端点按优先级排序
+        let endpoints = vec![
+            (self.api_base.as_str(), "Primary"),
+            (API_BASE_SG, "SG"),
+            (API_BASE_US, "US"),
+            (API_BASE_UG, "UG"),
+        ];
         
-        if !status.is_success() {
-            let endpoints_to_try = vec![(API_BASE_SG, "SG"), (API_BASE_US, "US"), (API_BASE_UG, "UG")];
+        let mut last_error = anyhow!("所有端点都失败");
+        
+        for (base, name) in endpoints {
+            let url = format!("{}/cloudide/api/v3/common/GetUserToken", base);
+            println!("[TraeApiClient] 尝试 GetUserToken 端点: {} ({})", name, base);
             
-            for (base, _name) in endpoints_to_try {
-                if base == self.api_base { continue; }
-                let retry_url = format!("{}/cloudide/api/v3/common/GetUserToken", base);
-                match self.client.post(&retry_url).headers(headers.clone()).send().await {
-                    Ok(retry_response) => {
-                        if retry_response.status().is_success() {
-                            match retry_response.json::<GetUserTokenResponse>().await {
+            // 每个端点重试2次
+            for attempt in 0..2 {
+                if attempt > 0 {
+                    println!("[TraeApiClient] 端点 {} 第 {} 次重试...", name, attempt + 1);
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                }
+                
+                match self.client.post(&url).headers(headers.clone()).send().await {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        if status.is_success() {
+                            match resp.json::<GetUserTokenResponse>().await {
                                 Ok(data) => {
+                                    println!("[TraeApiClient] ✅ GetUserToken 成功: {}", name);
                                     self.jwt_token = Some(data.result.token.clone());
-                                    self.api_base = base.to_string();
+                                    if base != self.api_base {
+                                        self.api_base = base.to_string();
+                                    }
                                     return Ok(data.result);
                                 }
-                                Err(_) => {}
+                                Err(e) => {
+                                    println!("[TraeApiClient] 端点 {} 解析响应失败: {}", name, e);
+                                    last_error = anyhow!("解析响应失败: {}", e);
+                                }
                             }
+                        } else {
+                            println!("[TraeApiClient] 端点 {} 返回错误状态: {}", name, status);
+                            last_error = anyhow!("HTTP 错误: {}", status);
                         }
                     }
-                    Err(_) => {}
+                    Err(e) => {
+                        println!("[TraeApiClient] 端点 {} 请求失败: {}", name, e);
+                        if e.is_timeout() {
+                            last_error = anyhow!("请求超时");
+                        } else if e.is_connect() {
+                            last_error = anyhow!("连接失败");
+                        } else {
+                            last_error = anyhow!("请求错误: {}", e);
+                        }
+                    }
                 }
             }
-
-            return Err(anyhow!("获取 Token 失败: {} - {}", status, body));
         }
 
-        let data: GetUserTokenResponse = serde_json::from_str(&body)?;
-        self.jwt_token = Some(data.result.token.clone());
-        Ok(data.result)
+        Err(anyhow!("获取 Token 失败: {}", last_error))
     }
 
     pub async fn get_user_info(&self) -> Result<UserInfoResult> {
-        let url = format!("{}/cloudide/api/v3/trae/GetUserInfo", API_BASE_UG);
         let headers = self.build_headers(false)?;
+        let endpoints = [API_BASE_UG, API_BASE_SG, API_BASE_US];
+        
+        let mut last_error = anyhow!("所有 GetUserInfo 端点都失败");
+        
+        for base in endpoints.iter() {
+            let url = format!("{}/cloudide/api/v3/trae/GetUserInfo", base);
+            println!("[TraeApiClient] 尝试 GetUserInfo 端点: {}", base);
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&json!({"IfWebPage": true}))
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            let data: GetUserInfoResponse = response.json().await?;
-            return Ok(data.result);
+            match self
+                .client
+                .post(&url)
+                .headers(headers.clone())
+                .json(&json!({"IfWebPage": true}))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<GetUserInfoResponse>().await {
+                        Ok(data) => return Ok(data.result),
+                        Err(e) => {
+                            println!("[TraeApiClient] 端点 {} 解析失败: {}", base, e);
+                            last_error = anyhow!("解析失败: {}", e);
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    println!("[TraeApiClient] 端点 {} 返回错误: {}", base, resp.status());
+                    last_error = anyhow!("HTTP 错误: {}", resp.status());
+                }
+                Err(e) => {
+                    println!("[TraeApiClient] 端点 {} 请求失败: {}", base, e);
+                    last_error = anyhow!("请求失败: {}", e);
+                }
+            }
         }
 
-        // GetUserInfo API 失败（如 404），尝试从 Token 解析基本信息
-        println!("[TraeApiClient] GetUserInfo API 失败 ({}), 尝试从 Token 解析用户信息", response.status());
+        // 所有 GetUserInfo 端点都失败，尝试从 Token 解析基本信息
+        println!("[TraeApiClient] 所有 GetUserInfo 端点都失败，尝试从 Token 解析用户信息");
         
         if let Some(ref token) = self.jwt_token {
             if let Ok(jwt_data) = Self::parse_jwt_token(token) {
@@ -346,27 +406,51 @@ impl TraeApiClient {
             }
         }
 
-        Err(anyhow!("获取用户信息失败: {}", response.status()))
+        Err(last_error)
     }
 
     pub async fn get_entitlement_list(&self) -> Result<EntitlementListResponse> {
-        let url = format!("{}/trae/api/v1/pay/user_current_entitlement_list", self.api_base);
         let headers = self.build_headers(true)?;
-
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&json!({"require_usage": true}))
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            return Err(anyhow!("获取配额信息失败: {}", response.status()));
+        let endpoints = [self.api_base.as_str(), API_BASE_SG, API_BASE_US, API_BASE_UG];
+        
+        let mut last_error = anyhow!("所有 entitlement 端点都失败");
+        
+        for base in endpoints.iter() {
+            let url = format!("{}/trae/api/v1/pay/user_current_entitlement_list", base);
+            println!("[TraeApiClient] 尝试 entitlement 端点: {}", base);
+            
+            match self
+                .client
+                .post(&url)
+                .headers(headers.clone())
+                .json(&json!({"require_usage": true}))
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<EntitlementListResponse>().await {
+                        Ok(data) => {
+                            println!("[TraeApiClient] ✅ entitlement 成功: {}", base);
+                            return Ok(data);
+                        }
+                        Err(e) => {
+                            println!("[TraeApiClient] 端点 {} 解析失败: {}", base, e);
+                            last_error = anyhow!("解析失败: {}", e);
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    println!("[TraeApiClient] 端点 {} 返回错误: {}", base, resp.status());
+                    last_error = anyhow!("HTTP 错误: {}", resp.status());
+                }
+                Err(e) => {
+                    println!("[TraeApiClient] 端点 {} 请求失败: {}", base, e);
+                    last_error = anyhow!("请求失败: {}", e);
+                }
+            }
         }
-
-        let data: EntitlementListResponse = response.json().await?;
-        Ok(data)
+        
+        Err(last_error)
     }
 
     pub async fn query_usage(
@@ -417,6 +501,7 @@ impl TraeApiClient {
 
         for base in endpoints.iter() {
             let url = format!("{}/trae/api/v1/pay/user_current_entitlement_list", base);
+            println!("[TraeApiClient] 尝试获取额度信息: {}", base);
 
             let response = self
                 .client
@@ -429,18 +514,34 @@ impl TraeApiClient {
             match response {
                 Ok(resp) if resp.status().is_success() => {
                     let response_text = resp.text().await?;
+                    println!("[TraeApiClient] 端点 {} 响应长度: {}", base, response_text.len());
 
                     if !response_text.contains("user_entitlement_pack_list") {
+                        println!("[TraeApiClient] 端点 {} 响应不包含 user_entitlement_pack_list", base);
+                        last_error = anyhow!("响应不包含额度信息");
                         continue;
                     }
 
                     match serde_json::from_str::<EntitlementListResponse>(&response_text) {
-                        Ok(entitlements) => return Self::parse_entitlements_to_summary(entitlements),
-                        Err(e) => last_error = anyhow!("解析响应失败: {}", e),
+                        Ok(entitlements) => {
+                            println!("[TraeApiClient] ✅ 成功获取额度信息: {}", base);
+                            return Self::parse_entitlements_to_summary(entitlements);
+                        }
+                        Err(e) => {
+                            println!("[TraeApiClient] 解析响应失败: {}", e);
+                            last_error = anyhow!("解析响应失败: {}", e);
+                        }
                     }
                 }
-                Ok(resp) => last_error = anyhow!("API 返回错误: {}", resp.status()),
-                Err(e) => last_error = anyhow!("请求失败: {}", e),
+                Ok(resp) => {
+                    let status = resp.status();
+                    println!("[TraeApiClient] 端点 {} 返回错误: {}", base, status);
+                    last_error = anyhow!("API 返回错误: {}", status);
+                }
+                Err(e) => {
+                    println!("[TraeApiClient] 端点 {} 请求失败: {}", base, e);
+                    last_error = anyhow!("请求失败: {}", e);
+                }
             }
         }
 
@@ -509,8 +610,8 @@ impl TraeApiClient {
     }
 
     pub async fn get_user_statistic_data(&self) -> Result<UserStatisticResult> {
-        let url = format!("{}/cloudide/api/v3/trae/GetUserStasticData", API_BASE_UG);
         let headers = self.build_headers(true)?;
+        let endpoints = [API_BASE_UG, API_BASE_SG, API_BASE_US];
 
         let local = Local::now();
         let offset = local.offset().local_minus_utc();
@@ -523,20 +624,41 @@ impl TraeApiClient {
             "OffsetMinutes": offset_minutes
         });
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&payload)
-            .send()
-            .await?;
+        let mut last_error = anyhow!("所有 GetUserStasticData 端点都失败");
 
-        if !response.status().is_success() {
-            return Err(anyhow!("获取用户统计数据失败: {}", response.status()));
+        for base in endpoints.iter() {
+            let url = format!("{}/cloudide/api/v3/trae/GetUserStasticData", base);
+            println!("[TraeApiClient] 尝试 GetUserStasticData 端点: {}", base);
+
+            match self
+                .client
+                .post(&url)
+                .headers(headers.clone())
+                .json(&payload)
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<GetUserStatisticResponse>().await {
+                        Ok(data) => return Ok(data.result),
+                        Err(e) => {
+                            println!("[TraeApiClient] 端点 {} 解析失败: {}", base, e);
+                            last_error = anyhow!("解析失败: {}", e);
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    println!("[TraeApiClient] 端点 {} 返回错误: {}", base, resp.status());
+                    last_error = anyhow!("HTTP 错误: {}", resp.status());
+                }
+                Err(e) => {
+                    println!("[TraeApiClient] 端点 {} 请求失败: {}", base, e);
+                    last_error = anyhow!("请求失败: {}", e);
+                }
+            }
         }
 
-        let data: GetUserStatisticResponse = response.json().await?;
-        Ok(data.result)
+        Err(last_error)
     }
 
     pub async fn query_birthday_bonus(&self) -> Result<bool> {

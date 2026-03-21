@@ -111,36 +111,25 @@ export function AccountCard({ account, usage, selected, onSelect, onContextMenu 
               </svg>
             </button>
           </div>
-          <div className="card-name">Trae 账号</div>
+          <div className="card-badges">
+            {(usage?.plan_type || account.plan_type) !== "Free" && (
+              <span className="badge pro">PRO</span>
+            )}
+            {account.is_current && (
+              <span className="badge current">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                </svg>
+                当前使用
+              </span>
+            )}
+          </div>
         </div>
 
         <div className={`card-status ${isTokenExpired ? "expired" : "normal"}`}>
           <span className="status-indicator"></span>
           {isTokenExpired ? "已过期" : "正常"}
         </div>
-      </div>
-
-      <div className="card-tags">
-        {/* 套餐类型标签 - Free 不显示，Pro 显示 PRO */}
-        {(usage?.plan_type || account.plan_type) !== "Free" && (
-          <span className="tag plan pro">PRO</span>
-        )}
-        {usage && usage.extra_fast_request_limit > 0 && (
-          <span className="tag extra">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.58-5.59L4 12l8 8 8-8z" transform="rotate(180 12 12)"/>
-            </svg>
-            礼包
-          </span>
-        )}
-        {account.is_current && (
-          <span className="tag current">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-            </svg>
-            当前使用
-          </span>
-        )}
       </div>
 
       {isDollarBilling && usage ? (

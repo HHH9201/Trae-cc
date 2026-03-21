@@ -698,7 +698,7 @@ impl AccountManager {
                         let new_client = TraeApiClient::new_with_token(&token_result.token)?;
                         new_client.get_usage_summary_by_token().await?
                     } else if error_msg.contains("401") {
-                        return Err(anyhow!("Token 已过期，请更新 Token 或 Cookies"));
+                        return Err(anyhow!("登录已过期，请重新登录此账号"));
                     } else {
                         return Err(e);
                     }
@@ -1115,7 +1115,7 @@ impl AccountManager {
                         let new_client = TraeApiClient::new_with_token(&token_result.token)?;
                         new_client.query_usage(start_time, end_time, page_size, page_num).await
                     } else if error_msg.contains("401") {
-                        Err(anyhow!("Token 已过期，请更新 Token 或 Cookies"))
+                        Err(anyhow!("登录已过期，请重新登录此账号"))
                     } else {
                         Err(e)
                     }

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import * as api from "../api";
 import type { Account } from "../types";
 
@@ -11,6 +11,19 @@ interface AddAccountModalProps {
 }
 
 type AddMode = "trae-ide" | "browser" | "register";
+
+// 注册进度步骤
+const REGISTER_STEPS = [
+  { percent: 5, message: "正在初始化..." },
+  { percent: 15, message: "生成临时邮箱..." },
+  { percent: 25, message: "打开注册页面..." },
+  { percent: 40, message: "填写注册信息..." },
+  { percent: 55, message: "等待验证码..." },
+  { percent: 70, message: "验证邮箱..." },
+  { percent: 85, message: "获取账号 Token..." },
+  { percent: 95, message: "保存账号信息..." },
+  { percent: 100, message: "注册完成!" },
+];
 
 export function AddAccountModal({
   isOpen,
@@ -25,8 +38,52 @@ export function AddAccountModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const browserRunRef = useRef(0);
+  
+  // 快速注册进度状态
+  const [registerProgress, setRegisterProgress] = useState(0);
+  const [registerStatus, setRegisterStatus] = useState("");
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 清理进度定时器
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
+
+  // 模拟进度更新
+  const startProgressSimulation = () => {
+    let currentStep = 0;
+    setRegisterProgress(0);
+    setRegisterStatus(REGISTER_STEPS[0].message);
+    
+    progressIntervalRef.current = setInterval(() => {
+      currentStep++;
+      if (currentStep < REGISTER_STEPS.length) {
+        const step = REGISTER_STEPS[currentStep];
+        setRegisterProgress(step.percent);
+        setRegisterStatus(step.message);
+      } else {
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current);
+        }
+      }
+    }, 3000); // 每3秒更新一次进度
+  };
+
+  // 停止进度模拟
+  const stopProgressSimulation = () => {
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+    setRegisterProgress(0);
+    setRegisterStatus("");
+  };
 
   const handleReadTraeAccount = async () => {
     setLoading(true);
@@ -107,16 +164,27 @@ export function AddAccountModal({
   const handleQuickRegister = async () => {
     setLoading(true);
     setError("");
+    startProgressSimulation();
 
     try {
       const account = await api.quickRegister(quickRegisterShowWindow);
-      onToast?.("success", `注册成功，已导入账号: ${account.email}`);
+      // 完成进度
+      setRegisterProgress(100);
+      setRegisterStatus("注册完成!");
+      
+      // 先通知父组件添加账号
       onAccountAdded?.(account);
-      handleClose();
+      
+      // 延迟关闭弹窗，让用户看到完成状态
+      setTimeout(() => {
+        handleClose();
+        // 显示成功提示
+        onToast?.("success", `注册成功，已导入账号: ${account.email}`);
+      }, 800);
     } catch (err: any) {
       setError(err.message || "快速注册失败");
-    } finally {
       setLoading(false);
+      stopProgressSimulation();
     }
   };
 
@@ -126,6 +194,7 @@ export function AddAccountModal({
     setBrowserStarted(false);
     setBrowserWaiting(false);
     setMode("trae-ide");
+    stopProgressSimulation();
     void api.cancelBrowserLogin();
     onClose();
   };
@@ -245,6 +314,22 @@ export function AddAccountModal({
               <h3>快速注册并自动导入</h3>
               <p>系统自动生成邮箱完成注册，并导入到列表</p>
             </div>
+
+            {/* 进度条区域 */}
+            {loading && (
+              <div className={`register-progress-container ${registerProgress >= 100 ? 'complete' : ''}`}>
+                <div className="register-progress-status">
+                  {registerProgress >= 100 ? '✓ ' : ''}{registerStatus}
+                </div>
+                <div className="register-progress-bar">
+                  <div 
+                    className="register-progress-fill" 
+                    style={{ width: `${registerProgress}%` }}
+                  />
+                </div>
+                <div className="register-progress-percent">{registerProgress}%</div>
+              </div>
+            )}
 
             {error && <div className="error-message">{error}</div>}
 
