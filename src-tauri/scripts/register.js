@@ -383,6 +383,46 @@
   // 全局状态，用于跟踪是否已点击过 Send Code
   let hasClickedSendCode = false;
 
+  // 检查是否有错误提示
+  const checkForErrorMessage = () => {
+    const errorSelectors = [
+      '.ant-message-error',
+      '.ant-message-notice-content',
+      '[class*="error"]',
+      '[class*="Error"]',
+      '.error-message',
+      '.trae-error'
+    ];
+    
+    for (const selector of errorSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        const text = (el.innerText || el.textContent || '').toLowerCase();
+        if (text.includes('maximum number of attempts') || 
+            text.includes('try again later') ||
+            text.includes('attempts reached')) {
+          return {
+            found: true,
+            message: el.innerText || el.textContent,
+            element: el
+          };
+        }
+      }
+    }
+    
+    // 也检查页面上的所有文本节点
+    const bodyText = document.body.innerText.toLowerCase();
+    if (bodyText.includes('maximum number of attempts reached')) {
+      return {
+        found: true,
+        message: 'Maximum number of attempts reached. Try again later.',
+        element: null
+      };
+    }
+    
+    return { found: false };
+  };
+
   const tryStart = (email) => {
     sendLog('');
     sendLog('========================================');
@@ -393,6 +433,26 @@
     sendLog('📄 页面标题: ' + document.title);
     sendLog('⏱️  document.readyState: ' + document.readyState);
     sendLog('🔘 已点击 Send Code: ' + hasClickedSendCode);
+    
+    // 检查是否已经达到最大尝试次数
+    const errorCheck = checkForErrorMessage();
+    if (errorCheck.found) {
+      sendLog('');
+      sendLog('❌❌❌ 检测到错误提示 ❌❌❌');
+      sendLog('错误信息: ' + errorCheck.message);
+      sendLog('');
+      sendLog('⚠️ Trae 注册限制已触发');
+      sendLog('请等待几小时后再尝试注册');
+      sendLog('');
+      
+      // 通知 Rust 后端
+      sendPayload({ 
+        error: 'MAX_ATTEMPTS_REACHED', 
+        message: errorCheck.message 
+      });
+      
+      return true; // 返回 true 停止重试
+    }
 
     let emailFilled = false;
     let emailInput = null;

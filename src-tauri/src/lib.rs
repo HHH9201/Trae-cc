@@ -6,9 +6,10 @@ mod account;
 mod autostart;
 mod machine;
 mod privacy;
-mod mail_client;
-mod quick_register;
+mod tempmail_client;
 mod quick_register_simple;
+mod browser_auto_login;
+mod logger;
 
 use std::collections::HashMap;
 use std::fs;
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 use reqwest::Client;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{oneshot, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri::webview::PageLoadEvent;
 use tauri::tray::TrayIconBuilder;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -29,7 +30,7 @@ use warp::Filter;
 
 use account::{AccountBrief, AccountManager, Account};
 use api::{TraeApiClient, UsageSummary, UsageQueryResponse, UserStatisticResult};
-use quick_register::wait_for_request_cookies;
+use quick_register_simple::wait_for_request_cookies;
 
 #[cfg(target_os = "windows")]
 fn hide_console_window() {
@@ -137,32 +138,30 @@ type Result<T> = std::result::Result<T, ApiError>;
 
 // ============ Tauri 命令 ============
 
-#[derive(Debug, Clone, serde::Serialize)]
-struct QuickRegisterNotice {
-    id: String,
-    message: String,
-}
-
-fn emit_quick_register_notice(app: &AppHandle, id: &str, message: &str) {
-    let payload = QuickRegisterNotice {
-        id: id.to_string(),
-        message: message.to_string(),
-    };
-    let _ = app.emit("quick_register_notice", payload);
-}
-
 /// 添加账号（通过 Token，可选 Cookies）
 #[tauri::command]
 async fn add_account_by_token(token: String, cookies: Option<String>, state: State<'_, AppState>) -> Result<Account> {
+    log::info!("Adding account by token");
     let mut manager = state.account_manager.lock().await;
-    manager.add_account_by_token(token, cookies, None).await.map_err(ApiError::from)
+    let result = manager.add_account_by_token(token, cookies, None).await.map_err(ApiError::from);
+    match &result {
+        Ok(_) => log::info!("Account added successfully by token"),
+        Err(e) => log::error!("Failed to add account by token: {:?}", e),
+    }
+    result
 }
 
 /// 添加账号（通过邮箱密码登录）
 #[tauri::command]
 async fn add_account_by_email(email: String, password: String, state: State<'_, AppState>) -> Result<Account> {
+    log::info!("Adding account by email: {}", email);
     let mut manager = state.account_manager.lock().await;
-    manager.add_account_by_email(email, password).await.map_err(ApiError::from)
+    let result = manager.add_account_by_email(email, password).await.map_err(ApiError::from);
+    match &result {
+        Ok(_) => log::info!("Account added successfully by email"),
+        Err(e) => log::error!("Failed to add account by email: {:?}", e),
+    }
+    result
 }
 
 #[tauri::command]
@@ -938,8 +937,9 @@ async fn finish_browser_login(state: State<'_, AppState>) -> Result<Account> {
             cookies
         }
         Err(err) => {
-            let _ = session.webview.close();
-            return Err(ApiError::from(err));
+            println!("[browser-login] 警告: 未能获取 cookies: {}", err);
+            println!("[browser-login] 将继续登录流程，但统计数据功能可能无法使用");
+            String::new() // 返回空字符串，让流程继续
         }
     };
 
@@ -1007,6 +1007,17 @@ async fn cancel_browser_login(app: AppHandle, state: State<'_, AppState>) -> Res
 }
 
 #[tauri::command]
+async fn browser_auto_login_command(
+    app: AppHandle,
+    email: String,
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<Account> {
+    println!("[browser-auto-login-command] 收到自动登录请求");
+    browser_auto_login::browser_auto_login(app, email, password, &state).await.map_err(|e| e.into())
+}
+
+#[tauri::command]
 async fn remove_account(account_id: String, state: State<'_, AppState>) -> Result<()> {
     let mut manager = state.account_manager.lock().await;
     manager.remove_account(&account_id).map_err(ApiError::from)
@@ -1029,19 +1040,24 @@ async fn get_account(account_id: String, state: State<'_, AppState>) -> Result<A
 /// 切换账号（设置活跃账号并更新机器码）
 #[tauri::command]
 async fn switch_account(account_id: String, force: Option<bool>, state: State<'_, AppState>) -> Result<()> {
+    log::info!("Switching account: {}", account_id);
     {
         let mut manager = state.account_manager.lock().await;
         let force = force.unwrap_or(false);
-        manager.switch_account(&account_id, force).await.map_err(ApiError::from)?;
+        if let Err(e) = manager.switch_account(&account_id, force).await {
+            log::error!("Failed to switch account: {}", e);
+            return Err(ApiError::from(e));
+        }
+        log::info!("Account switched successfully");
     }
 
     let settings = state.settings.lock().await.clone();
     if settings.privacy_auto_enable {
-        println!("[INFO] 等待 Trae IDE 启动后写入隐私模式设置");
+        log::info!("Waiting for Trae IDE to start before writing privacy settings");
         let db_path = match machine::get_trae_state_db_path() {
             Ok(path) => path,
             Err(err) => {
-                println!("[ERROR] 查找 Trae 数据库失败: {}", err);
+                log::error!("Failed to find Trae database: {}", err);
                 // 即使查找数据库失败，也尝试启动 Trae
                 let _ = tokio::task::spawn_blocking(|| {
                     let _ = machine::open_trae();
@@ -1568,6 +1584,37 @@ async fn handle_silent_start() -> anyhow::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logger first
+    if let Err(e) = logger::init_logger() {
+        eprintln!("[ERROR] Failed to initialize logger: {}", e);
+    }
+    
+    // Set up panic handler
+    std::panic::set_hook(Box::new(|info| {
+        logger::log_panic(info);
+        // Also show a message box on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use std::ffi::CString;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxA, MB_ICONERROR, MB_OK};
+            let message = format!("应用程序发生错误:\n{}\n\n请查看日志文件获取详细信息。", info);
+            if let Ok(c_message) = CString::new(message) {
+                if let Ok(c_title) = CString::new("Trae账号管理 - 错误") {
+                    unsafe {
+                        MessageBoxA(
+                            std::ptr::null_mut(),
+                            c_message.as_ptr() as *const u8,
+                            c_title.as_ptr() as *const u8,
+                            MB_OK | MB_ICONERROR,
+                        );
+                    }
+                }
+            }
+        }
+    }));
+    
+    log::info!("Application starting...");
+    
     // Check for silent flag
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--silent".to_string()) {
@@ -1576,12 +1623,14 @@ pub fn run() {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
         rt.block_on(async {
             if let Err(e) = handle_silent_start().await {
+                log::error!("[Silent] Error: {}", e);
                 eprintln!("[Silent] Error: {}", e);
             }
         });
         std::process::exit(0);
     }
 
+    log::info!("Initializing account manager...");
     let account_manager = AccountManager::new().expect("无法初始化账号管理器");
     let settings = load_settings_from_disk().unwrap_or_else(|err| {
         println!("[WARN] 读取设置失败，使用默认值: {}", err);
@@ -1612,6 +1661,7 @@ pub fn run() {
             start_browser_login,
             finish_browser_login,
             cancel_browser_login,
+            browser_auto_login_command,
             remove_account,
             get_accounts,
             get_account,
@@ -1642,6 +1692,10 @@ pub fn run() {
             open_pricing,
             check_update,
             install_update,
+            get_logs,
+            export_logs_cmd,
+            clear_logs_cmd,
+            get_log_file_path_cmd,
         ])
         .setup(|app| {
             // 创建托盘菜单
@@ -1702,4 +1756,26 @@ pub fn run() {
 
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// Logger commands
+#[tauri::command]
+async fn get_logs(count: usize) -> std::result::Result<Vec<String>, String> {
+  logger::get_recent_logs(count).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn export_logs_cmd(path: String) -> std::result::Result<(), String> {
+  let path_buf = std::path::PathBuf::from(path);
+  logger::export_logs(&path_buf).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn clear_logs_cmd() -> std::result::Result<(), String> {
+  logger::clear_logs().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_log_file_path_cmd() -> std::result::Result<String, String> {
+  Ok(logger::get_log_file_path().to_string_lossy().to_string())
 }

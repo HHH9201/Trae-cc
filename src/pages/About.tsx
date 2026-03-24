@@ -92,7 +92,7 @@ export function About({ onToast }: AboutProps) {
           <div className="about-header-text">
             <div className="title-row">
               <h1 className="about-title">Trae账号管理</h1>
-              <span className="version">v1.0.3</span>
+              <span className="version">v1.0.4</span>
             </div>
           </div>
         </div>

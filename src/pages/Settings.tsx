@@ -20,6 +20,9 @@ export function Settings({
   const [traePath, setTraePath] = useState<string>("");
   const [traePathLoading, setTraePathLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
+  
+  // 清除登录状态确认对话框
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const defaultSettings = useMemo<AppSettings>(
     () => ({
       quick_register_show_window: false,
@@ -88,17 +91,36 @@ export function Settings({
     }
   };
 
-  // 清除 Trae IDE 登录状态
-  const handleClearTraeLoginState = async () => {
-    if (!confirm("确定要清除 Trae IDE 登录状态吗？\n\n这将：\n• 重置 Trae IDE 机器码\n• 清除所有登录信息\n• 删除本地缓存数据\n\n操作后 Trae IDE 将变成全新安装状态，需要重新登录。\n\n请确保 Trae IDE 已关闭！")) {
-      return;
+  // 复制日志
+  const handleCopyLogs = async () => {
+    try {
+      const logs = await api.getLogs(100);
+      if (logs.length === 0) {
+        onToast?.("warning", "暂无日志内容");
+        return;
+      }
+      const logContent = logs.join('\n');
+      await navigator.clipboard.writeText(logContent);
+      onToast?.("success", "日志已复制到剪贴板（最近100条）");
+    } catch (err: any) {
+      console.error("复制日志失败:", err);
+      onToast?.("error", "复制日志失败: " + (err.message || "未知错误"));
     }
+  };
 
+  // 清除 Trae IDE 登录状态
+  const handleClearTraeLoginState = () => {
+    setShowClearConfirm(true);
+  };
+
+  // 确认清除
+  const confirmClearTraeLoginState = async () => {
+    setShowClearConfirm(false);
     setClearingTrae(true);
     try {
       await api.clearTraeLoginState();
       await loadTraeMachineId(); // 重新加载新的机器码
-      onToast?.("success", "Trae IDE 登录状态已清除，请重新打开 Trae IDE 登录");
+      onToast?.("success", "Trae IDE 登录状态已清除，请手动删除 .trae 文件夹后重启电脑");
     } catch (err: any) {
       onToast?.("error", err.message || "清除失败");
     } finally {
@@ -255,9 +277,14 @@ export function Settings({
                 </button>
               </div>
             </div>
-            <div className="setting-desc" style={{ marginTop: '8px', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12" y2="16"/></svg>
-              <span>清除登录状态会重置机器码，需重新登录 Trae IDE</span>
+            <div className="setting-desc" style={{ marginTop: '8px', color: 'var(--warning)', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12" y2="16"/></svg>
+                <span>清除登录状态会重置机器码，需重新登录 Trae IDE</span>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginLeft: '16px', marginTop: '4px' }}>
+                Windows 用户还需手动删除：C:\Users\[用户名]\.trae\ 等文件夹
+              </div>
             </div>
           </div>
           <div className="setting-action" style={{ display: 'flex', alignItems: 'flex-start', paddingTop: '32px', marginLeft: '16px' }}>
@@ -512,7 +539,161 @@ export function Settings({
             </div>
           </div>
         </div>
+
+        {/* 日志复制 */}
+        <div className="setting-item">
+          <div className="setting-info">
+            <div className="setting-label">应用日志</div>
+            <div className="setting-desc">复制日志内容用于反馈问题</div>
+          </div>
+          <div className="setting-action">
+            <button
+              className="setting-btn"
+              onClick={handleCopyLogs}
+              title="复制最近100条日志"
+            >
+              复制日志
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* 清除登录状态确认对话框 */}
+      {showClearConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+        }} onClick={() => setShowClearConfirm(false)}>
+          <div style={{
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '480px',
+            width: '90%',
+            maxHeight: '80vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            border: '1px solid var(--border)',
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--warning-bg)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+              }}>⚠️</div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                确定要清除 Trae IDE 登录状态吗？
+              </h3>
+            </div>
+
+            <div style={{ color: 'var(--text-secondary)', lineHeight: 1.6, fontSize: '14px' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
+                  【本软件将执行的操作】
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                  <li>重置 Trae IDE 机器码（machineid 文件）</li>
+                  <li>清除 Trae 相关注册表项</li>
+                </ul>
+              </div>
+
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: 'var(--danger-bg)', borderRadius: '8px', border: '1px solid var(--danger-border)' }}>
+                <div style={{ fontWeight: 600, color: 'var(--danger)', marginBottom: '8px' }}>
+                  【Windows 用户需手动操作（重要）】
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  由于系统权限限制，以下文件夹需要您手动删除：
+                </div>
+                <ol style={{ margin: 0, paddingLeft: '20px', fontFamily: 'monospace', fontSize: '13px' }}>
+                  <li>C:\Users\%USERNAME%\.trae\</li>
+                  <li>C:\Users\%USERNAME%\AppData\Roaming\Trae\</li>
+                  <li>C:\Users\%USERNAME%\AppData\Local\Trae\</li>
+                </ol>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '8px' }}>
+                  【完整操作流程】
+                </div>
+                <ol style={{ margin: 0, paddingLeft: '20px' }}>
+                  <li>退出 Trae IDE（确保进程已关闭）</li>
+                  <li>点击"确定"执行本软件清除操作</li>
+                  <li>手动删除上述文件夹</li>
+                  <li>重启电脑</li>
+                  <li>重新打开 Trae IDE 注册/登录新账号</li>
+                </ol>
+              </div>
+
+              <div style={{ color: 'var(--warning)', fontSize: '13px' }}>
+                请确保 Trae IDE 已完全关闭后再继续！
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                style={{
+                  padding: '10px 20px',
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  backgroundColor: 'transparent',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  transition: 'all 0.2s',
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-hover)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmClearTraeLoginState}
+                disabled={clearingTrae}
+                style={{
+                  padding: '10px 20px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--danger)',
+                  color: 'white',
+                  cursor: clearingTrae ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  opacity: clearingTrae ? 0.7 : 1,
+                  transition: 'all 0.2s',
+                }}
+                onMouseOver={(e) => {
+                  if (!clearingTrae) {
+                    e.currentTarget.style.backgroundColor = 'var(--danger-hover)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--danger)';
+                }}
+              >
+                {clearingTrae ? '清除中...' : '确定'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

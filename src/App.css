@@ -1704,47 +1704,56 @@ body {
 
 .modal-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 0;
+  padding: 0 4px 4px;
 }
 
 .modal-actions button {
-  padding: 10px 20px;
-  border-radius: 8px;
+  padding: 12px 28px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 100px;
 }
 
 .modal-actions button:hover {
   background: var(--bg-hover);
+  border-color: var(--accent-light);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .modal-actions button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--gradient-accent);
+  border-color: transparent;
   color: var(--text-inverse);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
 }
 
 .modal-actions button.primary:hover {
-  background: var(--accent-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
 }
 
 .modal-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .modal-actions.import-export-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 0;
 }
 
 .modal-actions.import-export-actions button {
@@ -3961,7 +3970,8 @@ body {
 
 /* Add Account Modal Form Sections */
 .add-account-modal {
-  max-width: 520px;
+  max-width: 480px;
+  padding: 24px;
 }
 
 /* Add Account Header */
@@ -3969,12 +3979,14 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .add-account-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -3982,36 +3994,50 @@ body {
 .quick-register-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--accent);
-  background: var(--accent-bg);
-  color: var(--accent);
+  padding: 8px 16px;
+  border: none;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #ffffff;
   font-size: 13px;
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  min-width: 70px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .quick-register-btn:hover:not(:disabled) {
-  background: var(--accent);
-  color: var(--text-inverse);
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+  box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
+}
+
+.quick-register-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
 }
 
 .quick-register-btn:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: none;
 }
 
 /* Add Mode Tabs */
 .add-mode-tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 24px;
-  padding: 4px;
+  gap: 12px;
+  margin-bottom: 28px;
+  padding: 6px;
   background: var(--bg-secondary);
-  border-radius: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
 }
 
 .mode-tab {
@@ -4019,16 +4045,18 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   padding: 10px 16px;
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .mode-tab:hover:not(:disabled) {
@@ -4039,7 +4067,8 @@ body {
 .mode-tab.active {
   background: var(--bg-card);
   color: var(--accent);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
 }
 
 .mode-tab:disabled {
@@ -4051,45 +4080,128 @@ body {
   flex-shrink: 0;
 }
 
+/* More Dropdown Menu */
+.more-dropdown-container {
+  position: relative;
+  flex: 1;
+}
+
+.more-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  overflow: hidden;
+  animation: dropdownFadeIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 6px;
+  min-width: 160px;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  border-radius: 8px;
+  margin-bottom: 2px;
+}
+
+.dropdown-item:last-child {
+  margin-bottom: 0;
+}
+
+.dropdown-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dropdown-item.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.dropdown-item svg {
+  flex-shrink: 0;
+}
+
+/* Header Dropdown - positioned at top right */
+.more-dropdown-container.header-dropdown {
+  flex: 0;
+}
+
+.more-dropdown-container.header-dropdown .more-dropdown-menu {
+  left: auto;
+  right: 0;
+  min-width: 140px;
+}
+
 /* Trae IDE Mode - Clean UI */
 .trae-ide-mode {
-  padding: 0;
+  padding: 8px 4px;
 }
 
 .mode-description {
   text-align: center;
-  padding: 32px 16px;
-  background: transparent;
+  padding: 40px 24px;
+  background: var(--gradient-card);
   border-radius: 16px;
   color: var(--text-primary);
-  margin-bottom: 0;
+  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: auto;
+  min-height: 180px;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
 }
 
 .mode-description svg {
   color: var(--accent);
-  margin-bottom: 16px;
+  margin-bottom: 20px;
   opacity: 1;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
+  filter: drop-shadow(0 4px 8px var(--accent-glow));
 }
 
 .mode-description h3 {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 12px;
-  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  letter-spacing: 0;
 }
 
 .mode-description p {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-secondary);
-  line-height: 1.6;
+  line-height: 1.5;
   margin-bottom: 0;
   max-width: 100%;
   white-space: nowrap;

@@ -558,6 +558,7 @@ impl TraeApiClient {
             let quota = &base.quota;
 
             if base.product_type == 2 {
+                // Extra pack (e.g., Anniversary Treat) - accumulate bonus
                 summary.extra_fast_request_limit = quota.premium_model_fast_request_limit;
                 summary.extra_fast_request_used = usage.premium_model_fast_amount;
                 summary.extra_fast_request_left = summary.extra_fast_request_limit as f64 - summary.extra_fast_request_used;
@@ -568,7 +569,16 @@ impl TraeApiClient {
                         summary.extra_package_name = "2026 Anniversary Treat".to_string();
                     }
                 }
+                
+                // Also accumulate bonus from extra packs
+                let bonus_limit = quota.bonus_usage_limit as f64;
+                let bonus_used = usage.bonus_usage_amount;
+                summary.bonus_dollar_limit += bonus_limit;
+                summary.bonus_dollar_used += bonus_used;
+                
+                log::info!("Extra pack bonus - limit: {}, used: {}", bonus_limit, bonus_used);
             } else {
+                // Main plan (Free/Pro)
                 summary.plan_type = if base.product_id == 0 { "Free".to_string() } else { "Pro".to_string() };
                 summary.reset_time = base.end_time;
 
@@ -584,13 +594,11 @@ impl TraeApiClient {
 
                 let bonus_limit = quota.bonus_usage_limit as f64;
                 let bonus_used = usage.bonus_usage_amount;
-                summary.bonus_dollar_limit = bonus_limit;
-                summary.bonus_dollar_used = bonus_used;
-                summary.bonus_dollar_left = bonus_limit - bonus_used;
-
-                summary.fast_dollar_limit = basic_limit + bonus_limit;
-                summary.fast_dollar_used = basic_used + bonus_used;
-                summary.fast_dollar_left = summary.fast_dollar_limit - summary.fast_dollar_used;
+                summary.bonus_dollar_limit += bonus_limit;
+                summary.bonus_dollar_used += bonus_used;
+                
+                log::info!("Main pack - basic_limit: {}, bonus_limit: {}", basic_limit, bonus_limit);
+                log::info!("Main pack - basic_used: {}, bonus_used: {}", basic_used, bonus_used);
 
                 summary.slow_request_limit = quota.premium_model_slow_request_limit;
                 summary.slow_request_used = usage.premium_model_slow_amount;
@@ -605,6 +613,15 @@ impl TraeApiClient {
                 summary.autocomplete_left = summary.autocomplete_limit as f64 - summary.autocomplete_used;
             }
         }
+        
+        // Calculate final values after processing all packs
+        summary.bonus_dollar_left = summary.bonus_dollar_limit - summary.bonus_dollar_used;
+        summary.fast_dollar_limit = summary.basic_dollar_limit + summary.bonus_dollar_limit;
+        summary.fast_dollar_used = summary.basic_dollar_used + summary.bonus_dollar_used;
+        summary.fast_dollar_left = summary.fast_dollar_limit - summary.fast_dollar_used;
+        
+        log::info!("Final - total bonus_limit: {}, total bonus_used: {}", summary.bonus_dollar_limit, summary.bonus_dollar_used);
+        log::info!("Final - total limit: {}, total used: {}", summary.fast_dollar_limit, summary.fast_dollar_used);
 
         Ok(summary)
     }
@@ -639,11 +656,27 @@ impl TraeApiClient {
                 .await
             {
                 Ok(resp) if resp.status().is_success() => {
-                    match resp.json::<GetUserStatisticResponse>().await {
-                        Ok(data) => return Ok(data.result),
+                    // 先获取原始文本以便调试
+                    match resp.text().await {
+                        Ok(text) => {
+                            println!("[TraeApiClient] 端点 {} 返回数据 (前500字符): {}", base, &text[..text.len().min(500)]);
+                            match serde_json::from_str::<GetUserStatisticResponse>(&text) {
+                                Ok(data) => {
+                                    println!("[TraeApiClient] 解析成功, Result 字段:");
+                                    println!("  UserID: {}", data.result.user_id);
+                                    println!("  RegisterDays: {}", data.result.register_days);
+                                    println!("  AiCnt365d count: {}", data.result.ai_cnt_365d.len());
+                                    return Ok(data.result);
+                                }
+                                Err(e) => {
+                                    println!("[TraeApiClient] 端点 {} 解析失败: {}", base, e);
+                                    last_error = anyhow!("解析失败: {}", e);
+                                }
+                            }
+                        }
                         Err(e) => {
-                            println!("[TraeApiClient] 端点 {} 解析失败: {}", base, e);
-                            last_error = anyhow!("解析失败: {}", e);
+                            println!("[TraeApiClient] 端点 {} 读取响应失败: {}", base, e);
+                            last_error = anyhow!("读取响应失败: {}", e);
                         }
                     }
                 }
@@ -797,6 +830,7 @@ pub async fn login_with_email(email: &str, password: &str) -> Result<EmailLoginR
     }
 
     let trae_login_url = "https://ug-normal.trae.ai/cloudide/api/v3/trae/Login?type=email";
+    println!("[login_with_email] 调用 Trae Login API: {}", trae_login_url);
 
     let trae_login_response = client
         .post(trae_login_url)
@@ -807,8 +841,13 @@ pub async fn login_with_email(email: &str, password: &str) -> Result<EmailLoginR
         .send()
         .await?;
 
-    if !trae_login_response.status().is_success() {
-        return Err(anyhow!("Trae 登录失败: {}", trae_login_response.status()));
+    let trae_status = trae_login_response.status();
+    let trae_body = trae_login_response.text().await?;
+    println!("[login_with_email] Trae Login 响应状态: {}", trae_status);
+    println!("[login_with_email] Trae Login 响应内容: {}", &trae_body[..trae_body.len().min(500)]);
+
+    if !trae_status.is_success() {
+        return Err(anyhow!("Trae 登录失败: {} - {}", trae_status, &trae_body[..trae_body.len().min(200)]));
     }
 
     let check_url = Url::parse("https://www.trae.ai")?;
@@ -842,6 +881,9 @@ pub async fn login_with_email(email: &str, password: &str) -> Result<EmailLoginR
     if !cookies.is_empty() && !cookies.contains("store-idc=") && !cookies.contains("trae-target-idc=") {
         cookies = format!("{cookies}; store-idc=alisg");
     }
+
+    println!("[login_with_email] ✅ 登录成功，获取到 cookies (长度: {})", cookies.len());
+    println!("[login_with_email] cookies 预览: {}", &cookies[..cookies.len().min(200)]);
 
     Ok(EmailLoginResult {
         token: token_data.result.token,

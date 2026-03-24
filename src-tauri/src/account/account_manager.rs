@@ -383,7 +383,10 @@ impl AccountManager {
                 acc.jwt_token = Some(token.clone());
                 acc.token_expired_at = None;
                 if let Some(cookie_str) = cookies.as_ref().filter(|v| !v.is_empty()) {
+                    println!("[upsert_account_by_token] 更新账号 cookies: user_id={}, cookies_length={}", acc.user_id, cookie_str.len());
                     acc.cookies = cookie_str.to_string();
+                } else {
+                    println!("[upsert_account_by_token] 没有提供 cookies，保留原有 cookies: user_id={}, existing_cookies_length={}", acc.user_id, acc.cookies.len());
                 }
                 if let Some(pass) = password.as_ref().filter(|v| !v.is_empty()) {
                     acc.password = Some(pass.to_string());
@@ -440,6 +443,7 @@ impl AccountManager {
         if let Some(index) = existing_index {
             // 账号已存在，更新信息
             println!("[AccountManager] 账号已存在，更新信息: user_id={}", login_result.user_id);
+            println!("[AccountManager] 更新 cookies (长度: {})", login_result.cookies.len());
             
             // 使用 Token 获取完整的用户信息
             let client = TraeApiClient::new_with_token(&login_result.token)?;
@@ -471,6 +475,7 @@ impl AccountManager {
             }
             
             self.save_store()?;
+            println!("[AccountManager] ✅ 账号信息已保存");
             return Ok(self.store.accounts[index].clone());
         }
 
@@ -627,10 +632,16 @@ impl AccountManager {
 
         // 如果账号有绑定的机器码，也更新系统机器码
         if let Some(machine_id) = &account.machine_id {
+            println!("[INFO] 尝试切换系统机器码到: {}", machine_id);
             match crate::machine::set_machine_guid(machine_id) {
-                Ok(_) => println!("[INFO] 已切换系统机器码: {}", machine_id),
-                Err(e) => println!("[WARN] 切换系统机器码失败（可能需要管理员权限）: {}", e),
+                Ok(_) => println!("[INFO] ✅ 已切换系统机器码: {}", machine_id),
+                Err(e) => {
+                    println!("[WARN] ❌ 切换系统机器码失败: {}", e);
+                    println!("[WARN] 这可能导致 Trae 仍然使用旧的设备标识进行限制");
+                }
             }
+        } else {
+            println!("[WARN] 账号没有 machine_id，无法切换系统机器码");
         }
 
         // 设置活跃账号和当前使用的账号
@@ -783,6 +794,11 @@ impl AccountManager {
             .ok_or_else(|| anyhow!("账号不存在"))?
             .clone();
 
+        // 检查是否有 cookies
+        if account.cookies.trim().is_empty() {
+            return Err(anyhow!("账号没有 Cookies，请使用密码重新登录"));
+        }
+
         let mut client = TraeApiClient::new(&account.cookies)?;
         let token_result = client.get_user_token().await?;
 
@@ -790,6 +806,8 @@ impl AccountManager {
             acc.jwt_token = Some(token_result.token);
             acc.token_expired_at = Some(token_result.expired_at);
             acc.updated_at = chrono::Utc::now().timestamp();
+            // 保留原有的 cookies，因为 API 没有返回新的 cookies
+            println!("[refresh_token] 已刷新 token，保留原有 cookies (长度: {})", acc.cookies.len());
         }
 
         self.save_store()?;
@@ -1358,12 +1376,46 @@ impl AccountManager {
         let token = account.jwt_token.as_ref()
             .ok_or_else(|| anyhow!("账号没有有效的 Token"))?;
 
-        let client = if account.cookies.trim().is_empty() {
-            TraeApiClient::new_with_token(token)?
-        } else {
-            TraeApiClient::new_with_token_and_cookies(token, &account.cookies)?
-        };
-        client.get_user_statistic_data().await
+        println!("[get_account_statistics] 账号: user_id={}, cookies_length={}", account.user_id, account.cookies.len());
+
+        // 尝试使用 cookies（如果有）
+        if !account.cookies.trim().is_empty() {
+            let client = TraeApiClient::new_with_token_and_cookies(token, &account.cookies)?;
+            
+            match client.get_user_statistic_data().await {
+                Ok(stats) => {
+                    println!("[get_account_statistics] ✅ 使用 cookies 成功获取统计数据");
+                    return Ok(stats);
+                }
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    println!("[get_account_statistics] 使用 cookies 失败: {}", error_msg);
+                    // 如果 cookies 失败，继续尝试只使用 token
+                }
+            }
+        }
+
+        // 尝试只使用 token（不需要 cookies）
+        println!("[get_account_statistics] 尝试只使用 token 获取统计数据...");
+        let client = TraeApiClient::new_with_token(token)?;
+        
+        match client.get_user_statistic_data().await {
+            Ok(stats) => {
+                println!("[get_account_statistics] ✅ 使用 token 成功获取统计数据");
+                Ok(stats)
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                println!("[get_account_statistics] 使用 token 也失败: {}", error_msg);
+                if error_msg.contains("403") {
+                    Err(anyhow!("统计数据 API 需要账号 Cookies。请使用编辑账号功能输入邮箱密码重新登录，或删除账号后使用浏览器登录重新添加。"))
+                } else if error_msg.contains("401") || error_msg.contains("20310") || error_msg.contains("10304") {
+                    Err(anyhow!("登录已过期，请重新登录此账号以查看统计数据"))
+                } else {
+                    Err(anyhow!("获取统计数据失败: {}", error_msg))
+                }
+            }
+        }
     }
 
     pub fn update_account_info_after_usage_check(

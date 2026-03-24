@@ -65,10 +65,18 @@ export function Stats({ accounts, hasLoaded = true }: StatsProps) {
   useEffect(() => {
     let cancelled = false;
     
+    // 调试日志
+    console.log('[Stats] accounts:', accounts);
+    console.log('[Stats] accounts.length:', accounts.length);
+    
     // 只获取当前登录账号的数据
     const currentAccount = accounts.find(a => a.is_current);
     
+    console.log('[Stats] currentAccount:', currentAccount);
+    console.log('[Stats] hasLoaded:', hasLoaded);
+    
     if (!currentAccount) {
+      console.log('[Stats] 没有找到当前账号，清空统计数据');
       setUserStats(null);
       setLoadingStats(false);
       setStatsError(null);
@@ -80,6 +88,7 @@ export function Stats({ accounts, hasLoaded = true }: StatsProps) {
 
     // Load cache for current account only
     const cache = loadStatsCache(currentAccount.id);
+    console.log('[Stats] cache:', cache);
 
     // Display valid cache immediately (even if stale)
     if (cache?.data) {
@@ -92,6 +101,7 @@ export function Stats({ accounts, hasLoaded = true }: StatsProps) {
 
     // Check if cache is stale (older than today 00:00)
     const isStale = !cache || cache.cachedAt < todayStart;
+    console.log('[Stats] isStale:', isStale);
 
     if (!isStale) {
       setLoadingStats(false);
@@ -146,6 +156,22 @@ export function Stats({ accounts, hasLoaded = true }: StatsProps) {
         </div>
       )}
 
+      {/* 没有当前账号 */}
+      {accounts.length > 0 && !accounts.find(a => a.is_current) && (
+        <div className="dashboard-empty" style={{
+          textAlign: "center",
+          padding: "60px 40px",
+          background: "var(--bg-card)",
+          borderRadius: "var(--radius-lg)",
+          border: "1px solid var(--glass-border)",
+          backdropFilter: "blur(16px)"
+        }}>
+          <div className="empty-icon" style={{ fontSize: "48px", marginBottom: "16px" }}>👤</div>
+          <h3 style={{ fontSize: "20px", fontWeight: "600", marginBottom: "8px", color: "var(--text-primary)" }}>未设置当前账号</h3>
+          <p style={{ color: "var(--text-muted)", marginBottom: "24px" }}>请在"账号管理"中右键点击账号，选择"设为当前使用"</p>
+        </div>
+      )}
+
       {/* 加载中 */}
       {loadingStats && (
         <div className="dashboard-widgets-section loading-placeholder" style={{
@@ -171,7 +197,7 @@ export function Stats({ accounts, hasLoaded = true }: StatsProps) {
       )}
 
       {/* 错误状态 */}
-      {statsError && !userStats && accounts.length > 0 && (
+      {statsError && !userStats && accounts.length > 0 && accounts.find(a => a.is_current) && (
         <div className="dashboard-widgets-section error-placeholder" style={{
           marginBottom: "24px",
           textAlign: "center",
@@ -182,7 +208,18 @@ export function Stats({ accounts, hasLoaded = true }: StatsProps) {
           border: "1px solid rgba(245, 101, 101, 0.2)"
         }}>
           <div style={{ fontSize: "40px", marginBottom: "12px" }}>⚠️</div>
-          <p style={{ fontSize: "16px", marginBottom: "16px" }}>{statsError}</p>
+          <p style={{ fontSize: "16px", marginBottom: "8px" }}>{statsError}</p>
+          {statsError.includes("Cookies") && (
+            <div style={{ fontSize: "14px", color: "var(--text-muted)", marginBottom: "16px", textAlign: "left", maxWidth: "400px", margin: "0 auto 16px" }}>
+              <p style={{ marginBottom: "8px" }}><strong>解决方法：</strong></p>
+              <p style={{ marginBottom: "4px" }}>1. 回到"账号管理"</p>
+              <p style={{ marginBottom: "4px" }}>2. 右键点击当前账号 → 选择"编辑账号"</p>
+              <p style={{ marginBottom: "4px" }}>3. 输入邮箱和密码，点击"保存并登录"</p>
+              <p style={{ fontSize: "12px", marginTop: "8px", color: "var(--text-secondary)" }}>
+                注意：简单的"重新登录"只会刷新 Token，不会获取 Cookies。需要使用密码重新登录才能获取 Cookies。
+              </p>
+            </div>
+          )}
           <button
             onClick={() => {
               window.location.reload();

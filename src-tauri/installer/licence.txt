@@ -1,0 +1,15 @@
+trae-cc License Agreement
+
+Copyright (c) 2025 HHJ. All rights reserved.
+
+1. License Grant
+This software is free and open source. You are free to use, copy, modify, and distribute it.
+
+2. Disclaimer
+This software is provided "as is" without warranty of any kind.
+
+3. Restrictions
+You may not use this software for any illegal purposes.
+
+4. Third Party Components
+This software may contain third-party open source components, subject to their respective licenses.

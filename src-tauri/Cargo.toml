@@ -1,6 +1,6 @@
 [package]
 name = "Trae账号管理"
-version = "1.0.3"
+version = "1.0.4"
 description = "Trae账号管理 - 管理 Trae 订阅账号使用量"
 authors = ["HJH"]
 edition = "2021"
@@ -24,6 +24,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 anyhow = "1"
 regex = "1"
+rand = "0.8"
 directories = "5"
 base64 = "0.22"
 warp = "0.3"
@@ -34,6 +35,12 @@ tauri-plugin-dialog = "2.2"
 tauri-plugin-updater = "2.2"
 tauri-plugin-positioner = "2.2"
 rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Logging dependencies
+tauri-plugin-log = "2"
+log = "0.4"
+fern = "0.7"
+humantime = "2"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

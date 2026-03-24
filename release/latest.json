@@ -1,11 +1,11 @@
 {
-  "version": "1.0.0",
-  "notes": "初始版本发布",
-  "pub_date": "2026-03-16T00:00:00Z",
+  "version": "1.0.3",
+  "notes": "See the assets to download and install this version.",
+  "pub_date": "2026-03-22T15:37:58Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "",
-      "url": "https://github.com/HHH9201/Trae-CC/releases/download/v1.0.0/Trae账号管理-v1.0.0.exe"
+      "url": "https://github.com/HHH9201/Trea-cc/releases/download/v1.0.3/Trae._1.0.3_x64-setup.exe"
     }
   }
 }

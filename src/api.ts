@@ -46,6 +46,11 @@ export async function cancelBrowserLogin(): Promise<void> {
   return invoke("cancel_browser_login");
 }
 
+// 浏览器自动登录
+export async function browserAutoLogin(email: string, password: string): Promise<Account> {
+  return invokeNetwork("browser_auto_login_command", { email, password });
+}
+
 // 下载并运行更新安装包（Windows: .msi）
 export async function downloadAndRunInstaller(url: string): Promise<string> {
   return invokeNetwork("download_and_run_installer", { url });
@@ -251,4 +256,26 @@ export async function checkUpdate(): Promise<{ version: string; current_version:
 // 安装更新
 export async function installUpdate(): Promise<void> {
   return invoke("install_update");
+}
+
+// ============ 日志相关 API ============
+
+// 获取最近日志
+export async function getLogs(count: number): Promise<string[]> {
+  return invoke("get_logs", { count });
+}
+
+// 导出日志
+export async function exportLogs(path: string): Promise<void> {
+  return invoke("export_logs_cmd", { path });
+}
+
+// 清空日志
+export async function clearLogs(): Promise<void> {
+  return invoke("clear_logs_cmd");
+}
+
+// 获取日志文件路径
+export async function getLogFilePath(): Promise<string> {
+  return invoke("get_log_file_path_cmd");
 }
